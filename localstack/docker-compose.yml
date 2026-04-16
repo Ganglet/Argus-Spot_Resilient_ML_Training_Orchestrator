@@ -1,0 +1,26 @@
+version: "3.8"
+
+# LocalStack simulates S3 + SQS + Lambda locally — zero AWS cost during dev.
+# Usage:
+#   docker compose up -d
+#   export AWS_ENDPOINT_URL=http://localhost:4566
+#   aws --endpoint-url http://localhost:4566 s3 ls
+
+services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: argus-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs,lambda,iam
+      - DEBUG=0
+      - AWS_DEFAULT_REGION=eu-north-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./init:/etc/localstack/init/ready.d  # bootstrap scripts run on startup
+
+volumes:
+  localstack_data:
