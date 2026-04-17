@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import os
+import mlflow
+import mlflow.pytorch
 from dataset import create_dataloaders
 from transformer import SpotInterruptionPredictor
 
@@ -55,33 +57,46 @@ def train_model():
     # 4. Training Loop (First Run - Verify Loss Decreasing)
     epochs = 3  # Keep it small just for verifying loss drops
     
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0.0
-        
-        for batch_idx, (x, y) in enumerate(train_loader):
-            x, y = x.to(device), y.to(device)
-
-            optimizer.zero_grad()
-
-            raw_logits = model(x)
-            loss = criterion(raw_logits, y)
-
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-            
-            if batch_idx % 200 == 0:
-                print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx}/{len(train_loader)} | Loss: {loss.item():.4f}")
-
-        avg_loss = running_loss / len(train_loader)
-        print(f"==> Epoch {epoch+1} Complete. Average Training Loss: {avg_loss:.4f}\n")
+    mlflow.set_tracking_uri(os.path.join(base_dir, "mlruns"))
+    mlflow.set_experiment("Spot-Interruption-Predictor")
     
-    # 5. Save Checkpoint
-    checkpoint_path = os.path.join(base_dir, "spot_transformer.pt")
-    torch.save(model.state_dict(), checkpoint_path)
-    print(f"Model saved to {checkpoint_path}")
+    with mlflow.start_run():
+        mlflow.log_param("epochs", epochs)
+        mlflow.log_param("batch_size", 64)
+        mlflow.log_param("learning_rate", 0.001)
+        mlflow.log_param("focal_alpha", 0.75)
+        mlflow.log_param("focal_gamma", 2.0)
+
+        for epoch in range(epochs):
+            model.train()
+            running_loss = 0.0
+            
+            for batch_idx, (x, y) in enumerate(train_loader):
+                x, y = x.to(device), y.to(device)
+
+                optimizer.zero_grad()
+
+                raw_logits = model(x)
+                loss = criterion(raw_logits, y)
+
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item()
+                
+                if batch_idx % 200 == 0:
+                    print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx}/{len(train_loader)} | Loss: {loss.item():.4f}")
+
+            avg_loss = running_loss / len(train_loader)
+            mlflow.log_metric("train_loss", avg_loss, step=epoch)
+            print(f"==> Epoch {epoch+1} Complete. Average Training Loss: {avg_loss:.4f}\n")
+        
+        # 5. Save Checkpoint inside MLflow
+        checkpoint_path = os.path.join(base_dir, "spot_transformer.pt")
+        torch.save(model.state_dict(), checkpoint_path)
+        
+        mlflow.pytorch.log_model(model, "model")
+        print(f"Model saved to {checkpoint_path} and logged to MLflow")
 
 if __name__ == "__main__":
     train_model()
