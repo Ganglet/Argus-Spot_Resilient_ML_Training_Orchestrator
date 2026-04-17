@@ -28,7 +28,7 @@ EC2 Spot Price History
 | Lambda price collector | Person A | ✅ Built (lambda.tf) |
 | Kubernetes Operator (CRD + kopf) | Person A | Week 4–5 |
 | EKS Cluster | Person A | ✅ Built (eks.tf) |
-| ML Transformer model | Person B | Week 2–3 (Feature Pipeline ✅) |
+| ML Transformer model | Person B | ✅ Week 2-3 complete |
 | FastAPI prediction service | Person B | Week 4 |
 | End-to-end integration | Both | Week 5–6 |
 
@@ -226,7 +226,7 @@ spec:
 |------|----------|----------|
 | 1 | ✅ Terraform base infra, VPC, S3, SQS, IAM | ✅ Pull Spot price history, EDA |
 | 2 | ✅ EKS cluster, Lambda price collector live | ✅ Feature pipeline, PyTorch Dataset |
-| 3 | IRSA, OIDC, ECR repos | Model training, MLflow, threshold tuning |
+| 3 | IRSA, OIDC, ECR repos | ✅ PyTorch Transformer, local training loop |
 | 4 | CRD schema, kopf skeleton, Minikube | FastAPI /predict, Dockerfile, push to ECR |
 | 5 | Operator core: cordon + reschedule | S3 checkpoint trigger, CIFAR-10 test job |
 | 6 | EKS full deploy, Helm chart, SQS wiring | Chaos testing, benchmark collection |
