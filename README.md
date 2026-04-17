@@ -24,10 +24,11 @@ EC2 Spot Price History
 
 | Layer | Owner | Status |
 |-------|-------|--------|
-| AWS Infrastructure (Terraform) | Person A | ✅ Week 1 complete |
-| Lambda price collector | Person A | ✅ Written, deploy in Week 2 |
+| AWS Infrastructure (Terraform) | Person A | ✅ Week 1 & 2 complete |
+| Lambda price collector | Person A | ✅ Built (lambda.tf) |
 | Kubernetes Operator (CRD + kopf) | Person A | Week 4–5 |
-| ML Transformer model | Person B | Week 2–3 |
+| EKS Cluster | Person A | ✅ Built (eks.tf) |
+| ML Transformer model | Person B | Week 2–3 (Feature Pipeline ✅) |
 | FastAPI prediction service | Person B | Week 4 |
 | End-to-end integration | Both | Week 5–6 |
 
@@ -223,8 +224,8 @@ spec:
 
 | Week | Person A | Person B |
 |------|----------|----------|
-| 1 | ✅ Terraform base infra, VPC, S3, SQS, IAM | Pull Spot price history, EDA |
-| 2 | EKS cluster, Lambda price collector live | Feature pipeline, PyTorch Dataset |
+| 1 | ✅ Terraform base infra, VPC, S3, SQS, IAM | ✅ Pull Spot price history, EDA |
+| 2 | ✅ EKS cluster, Lambda price collector live | ✅ Feature pipeline, PyTorch Dataset |
 | 3 | IRSA, OIDC, ECR repos | Model training, MLflow, threshold tuning |
 | 4 | CRD schema, kopf skeleton, Minikube | FastAPI /predict, Dockerfile, push to ECR |
 | 5 | Operator core: cordon + reschedule | S3 checkpoint trigger, CIFAR-10 test job |

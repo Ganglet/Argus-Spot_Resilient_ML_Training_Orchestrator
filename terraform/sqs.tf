@@ -2,8 +2,8 @@
 # Dead-letter queue — messages that fail processing land here for inspection
 # ---------------------------------------------------------------------------
 resource "aws_sqs_queue" "risk_events_dlq" {
-  name                       = "${var.project}-risk-events-dlq"
-  message_retention_seconds  = 1209600 # 14 days
+  name                      = "${var.project}-risk-events-dlq"
+  message_retention_seconds = 1209600 # 14 days
 
   tags = { Name = "${var.project}-risk-events-dlq" }
 }

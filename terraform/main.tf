@@ -70,9 +70,9 @@ resource "aws_subnet" "public" {
 
   # Required tag for EKS to discover subnets for load balancers
   tags = {
-    Name                                        = "${var.project}-public-${each.key}"
-    "kubernetes.io/role/elb"                    = "1"
-    "kubernetes.io/cluster/${var.project}-eks"  = "shared"
+    Name                                       = "${var.project}-public-${each.key}"
+    "kubernetes.io/role/elb"                   = "1"
+    "kubernetes.io/cluster/${var.project}-eks" = "shared"
   }
 }
 
@@ -88,9 +88,9 @@ resource "aws_subnet" "private" {
   availability_zone = "${var.aws_region}${each.key}"
 
   tags = {
-    Name                                        = "${var.project}-private-${each.key}"
-    "kubernetes.io/role/internal-elb"           = "1"
-    "kubernetes.io/cluster/${var.project}-eks"  = "shared"
+    Name                                       = "${var.project}-private-${each.key}"
+    "kubernetes.io/role/internal-elb"          = "1"
+    "kubernetes.io/cluster/${var.project}-eks" = "shared"
   }
 }
 
