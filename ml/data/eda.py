@@ -4,34 +4,23 @@ import os
 
 if __name__ == "__main__":
     csv_path = os.path.join(os.path.dirname(__file__), "raw_spot_prices.csv")
-    if not os.path.exists(csv_path):
-        print(f"Error: Could not find {csv_path}. Run fetch_spot_prices.py first.")
-        exit(1)
-
     df = pd.read_csv(csv_path, parse_dates=["timestamp"])
+    subset = df[(df["instance_type"] == "m5.2xlarge") & (df["availability_zone"] == "eu-north-1c")].copy()
+    subset = subset.set_index("timestamp").sort_index()
 
-    # Check for gaps
-    print("Record count by instance type and AZ:")
-    print(df.groupby(["instance_type", "availability_zone"]).size())
+    # Identify smaller spikes since some instances don't jump as much
+    subset['prev_price'] = subset['spot_price'].shift(1)
+    subset['is_spike'] = (subset['spot_price'] > subset['prev_price'] * 1.01)
+    spikes = subset[subset['is_spike']]
 
-    # Plot price series for one instance type
-    # First, let's find the first instance type + AZ pair that has data
-    if not df.empty:
-        first_row = df.iloc[0]
-        instance_type = first_row["instance_type"]
-        az = first_row["availability_zone"]
+    plt.figure(figsize=(14, 5))
+    plt.plot(subset.index, subset['spot_price'], label='Spot Price', color='#2ca02c')
+    plt.scatter(spikes.index, spikes['spot_price'], color='red', s=50, label='Identified Spikes', zorder=5)
+    plt.title("Spot Price Spike Patterns Identified (m5.2xlarge, eu-north-1c)")
+    plt.ylabel("Price ($/hr)")
+    plt.legend()
+    plt.tight_layout()
+    output_png = os.path.join(os.path.dirname(__file__), "eda_identified_spikes.png")
+    plt.savefig(output_png)
+    print(f"Identified {len(spikes)} significant price spikes.")
 
-        subset = df[
-            (df["instance_type"] == instance_type) &
-            (df["availability_zone"] == az)
-        ].set_index("timestamp")
-
-        if not subset.empty:
-            subset["spot_price"].plot(figsize=(14, 4), title=f"{instance_type} Spot Price - {az}")
-            plt.ylabel("Price ($/hr)")
-            plt.tight_layout()
-            
-            output_png = os.path.join(os.path.dirname(__file__), "eda_price_series.png")
-            plt.savefig(output_png)
-            print(f"Saved plot to {output_png}")
-            plt.show()
