@@ -224,9 +224,9 @@ spec:
 
 | Week | Person A | Person B |
 |------|----------|----------|
-| 1 | ✅ Terraform base infra, VPC, S3, SQS, IAM | Pull Spot price history, EDA |
-| 2 | EKS cluster, Lambda price collector live | Feature pipeline, PyTorch Dataset |
-| 3 | IRSA, OIDC, ECR repos | Model training, MLflow, threshold tuning |
+| 1 | ✅ Terraform base infra, VPC, S3, SQS, IAM | ✅ Pull Spot price history, EDA |
+| 2 | ✅ EKS cluster, Lambda price collector live | ✅ Feature pipeline, PyTorch Dataset |
+| 3 | IRSA, OIDC, ECR repos | ✅ Model training, MLflow, threshold tuning |
 | 4 | CRD schema, kopf skeleton, Minikube | FastAPI /predict, Dockerfile, push to ECR |
 | 5 | Operator core: cordon + reschedule | S3 checkpoint trigger, CIFAR-10 test job |
 | 6 | EKS full deploy, Helm chart, SQS wiring | Chaos testing, benchmark collection |
