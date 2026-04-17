@@ -15,7 +15,7 @@ class FocalLoss(nn.Module):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
-        self.bce_logit_loss = nn.BCEWithWithLogitsLoss(reduction='none')
+        self.bce_logit_loss = nn.BCEWithLogitsLoss(reduction='none')
 
     def forward(self, inputs, targets):
         bce_loss = self.bce_logit_loss(inputs, targets)
