@@ -31,4 +31,5 @@ ml/data/*.png
 # Misc
 .DS_Store
 .env
+.env.local
 *.log
