@@ -25,10 +25,11 @@ EC2 Spot Price History
 | Layer | Owner | Status |
 |-------|-------|--------|
 | AWS Infrastructure (VPC, S3, SQS, IAM) | Person A | ✅ Live in AWS |
-| Lambda price collector | Person A | 📝 Code written (pending `apply`) |
+| Lambda price collector + EventBridge cron | Person A | ✅ Live in AWS — writing CSVs every 5 min |
+| EKS Cluster | Person A | 📝 Code written (`eks.tf`) — deploys Week 6 |
 | Kubernetes Operator (CRD + kopf) | Person A | Week 4–5 |
-| EKS Cluster | Person A | 📝 Code written (Week 6 deploy) |
-| ML Transformer model | Person B | ✅ Trained & ready locally |
+| ML feature pipeline + EDA | Person B | ✅ Complete locally |
+| Transformer model (trained) | Person B | ✅ Trained locally, artifacts in S3 |
 | FastAPI prediction service | Person B | Week 4 |
 | End-to-end integration | Both | Week 5–6 |
 
@@ -83,7 +84,7 @@ Before writing any model or API code, read [docs/contracts.md](docs/contracts.md
 
 ---
 
-## What's Live in AWS (Week 1)
+## What's Live in AWS (Weeks 1–2)
 
 All resources are in `eu-north-1` (Stockholm). Provisioned via Terraform — do not create or modify these manually in the console.
 
@@ -96,6 +97,9 @@ All resources are in `eu-north-1` (Stockholm). Provisioned via Terraform — do 
 | SQS | `argus-risk-events-dlq` | Dead-letter queue for failed messages |
 | IAM Role | `argus-operator` | K8s operator AWS permissions (IRSA in Week 3) |
 | IAM Role | `argus-lambda-price-collector` | Lambda AWS permissions |
+| Lambda | `argus-price-collector` | Fetches Spot prices every 5 min → S3 |
+| EventBridge | `argus-5min-cron` | Triggers Lambda on schedule |
+| CloudWatch Logs | `/aws/lambda/argus-price-collector` | Lambda execution logs (7 day retention) |
 | Budget | `argus-dev-budget` | $20/month alarm |
 
 **Person B needs:**
@@ -248,9 +252,9 @@ To maintain repository health, size, and security, we strictly enforce the follo
 
 | Week | Person A (Infra / Operator) | Person B (ML / API) |
 |------|-----------------------------|---------------------|
-| **1** | ✅ **Completed:** Terraform base infra, VPC, S3, SQS, IAM deployed. | ✅ **Completed:** Pull Spot price history, initial EDA. |
-| **2** | ⏳ **Pending `apply`:** EKS cluster & Lambda code written, but deferred deployment to save costs. | ✅ **Completed:** Feature pipeline, PyTorch Dataset, dataloaders built. |
-| **3** | ⏳ **Pending:** IRSA, OIDC, ECR repos. | ✅ **Completed:** Model training (Transformer), MLflow tracking, focal loss, hyperparameter tuning. |
+| **1** | ✅ **Completed:** Terraform base infra — VPC, S3, SQS, IAM live in AWS. | ✅ **Completed:** Spot price history pull, initial EDA. |
+| **2** | ✅ **Completed:** Lambda price collector + EventBridge cron live — CSVs flowing into S3 every 5 min. EKS code written (`eks.tf`), deployment deferred to Week 6. | ✅ **Completed:** Feature pipeline, PyTorch Dataset + DataLoader, first training run. |
+| **3** | ⏳ **Up Next:** IRSA, OIDC provider, ECR repos. | ✅ **Completed:** Transformer trained, Focal Loss, MLflow tracking, hyperparameter tuning. |
 | **4** | ⏳ **Pending:** CRD schema, kopf skeleton, Minikube. | 🔜 **Up Next:** FastAPI `/predict` service, Dockerfile, push to ECR. |
 | **5** | ⏳ **Pending:** Operator core: cordon + reschedule. | ⏳ **Pending:** S3 checkpoint trigger, CIFAR-10 test job. |
 | **6** | ⏳ **Pending:** EKS full deploy, Helm chart, SQS wiring. | ⏳ **Pending:** Chaos testing, benchmark collection. |
