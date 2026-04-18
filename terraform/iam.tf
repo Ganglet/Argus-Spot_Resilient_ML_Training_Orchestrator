@@ -94,3 +94,82 @@ resource "aws_iam_role_policy" "operator" {
     ]
   })
 }
+
+# ---------------------------------------------------------------------------
+# Person B IAM user — ML engineer
+# Needs access keys for: Docker → ECR push, boto3 → S3 + SQS
+# ---------------------------------------------------------------------------
+resource "aws_iam_user" "person_b" {
+  name = "${var.project}-person-b"
+}
+
+resource "aws_iam_user_policy" "person_b" {
+  name = "${var.project}-person-b-policy"
+  user = aws_iam_user.person_b.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # Docker login to ECR + push images to all 3 argus repos
+        Sid    = "ECRPush"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRImagePush"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
+        Resource = [
+          "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/argus/*"
+        ]
+      },
+      {
+        # Read Spot price CSVs from feature store (model training input)
+        Sid      = "FeatureStoreRead"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:ListBucket"]
+        Resource = [
+          aws_s3_bucket.feature_store.arn,
+          "${aws_s3_bucket.feature_store.arn}/*"
+        ]
+      },
+      {
+        # Write model checkpoints to S3
+        Sid    = "CheckpointWrite"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject", "s3:GetObject", "s3:ListBucket",
+          "s3:CreateMultipartUpload", "s3:UploadPart", "s3:CompleteMultipartUpload"
+        ]
+        Resource = [
+          aws_s3_bucket.checkpoints.arn,
+          "${aws_s3_bucket.checkpoints.arn}/*"
+        ]
+      },
+      {
+        # Publish risk events from FastAPI to SQS
+        Sid      = "RiskEventPublish"
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
+        Resource = aws_sqs_queue.risk_events.arn
+      }
+    ]
+  })
+}
+
+output "person_b_iam_username" {
+  value       = aws_iam_user.person_b.name
+  description = "Go to IAM → Users → this user → Security credentials → Create access key"
+}
