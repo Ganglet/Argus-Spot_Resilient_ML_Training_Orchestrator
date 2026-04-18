@@ -26,7 +26,7 @@ EC2 Spot Price History
 |-------|-------|--------|
 | AWS Infrastructure (VPC, S3, SQS, IAM) | Person A | ✅ Live in AWS |
 | Lambda price collector + EventBridge cron | Person A | ✅ Live in AWS — writing CSVs every 5 min |
-| EKS Cluster | Person A | 📝 Code written (`eks.tf`) — deploys Week 6 |
+| EKS Cluster + IRSA + ECR | Person A | ✅ Control plane live, IRSA verified, ECR repos ready |
 | Kubernetes Operator (CRD + kopf) | Person A | Week 4–5 |
 | ML feature pipeline + EDA | Person B | ✅ Complete locally |
 | Transformer model (trained) | Person B | ✅ Trained locally, artifacts in S3 |
@@ -84,7 +84,7 @@ Before writing any model or API code, read [docs/contracts.md](docs/contracts.md
 
 ---
 
-## What's Live in AWS (Weeks 1–2)
+## What's Live in AWS (Weeks 1–3)
 
 All resources are in `eu-north-1` (Stockholm). Provisioned via Terraform — do not create or modify these manually in the console.
 
@@ -95,12 +95,17 @@ All resources are in `eu-north-1` (Stockholm). Provisioned via Terraform — do 
 | S3 | `argus-feature-store-844641713781` | Spot price CSV pipeline output |
 | SQS | `argus-risk-events` | Risk alert event bus |
 | SQS | `argus-risk-events-dlq` | Dead-letter queue for failed messages |
-| IAM Role | `argus-operator` | K8s operator AWS permissions (IRSA in Week 3) |
 | IAM Role | `argus-lambda-price-collector` | Lambda AWS permissions |
 | Lambda | `argus-price-collector` | Fetches Spot prices every 5 min → S3 |
 | EventBridge | `argus-5min-cron` | Triggers Lambda on schedule |
 | CloudWatch Logs | `/aws/lambda/argus-price-collector` | Lambda execution logs (7 day retention) |
 | Budget | `argus-dev-budget` | $20/month alarm |
+| EKS Cluster | `argus-eks` | K8s control plane — live for IRSA (node groups destroyed, recreated Week 6) |
+| IAM OIDC Provider | — | Registers EKS OIDC endpoint with AWS IAM — required for IRSA |
+| IAM Role | `argus-operator-irsa` | IRSA role pods assume — scoped to `default/argus-operator` ServiceAccount |
+| ECR | `argus/operator` | Operator image registry |
+| ECR | `argus/predict-service` | FastAPI prediction service image registry |
+| ECR | `argus/training-job` | CIFAR-10 training job image registry |
 
 **Person B needs:**
 - The feature store bucket name: `argus-feature-store-844641713781`
@@ -254,8 +259,8 @@ To maintain repository health, size, and security, we strictly enforce the follo
 |------|-----------------------------|---------------------|
 | **1** | ✅ **Completed:** Terraform base infra — VPC, S3, SQS, IAM live in AWS. | ✅ **Completed:** Spot price history pull, initial EDA. |
 | **2** | ✅ **Completed:** Lambda price collector + EventBridge cron live — CSVs flowing into S3 every 5 min. EKS code written (`eks.tf`), deployment deferred to Week 6. | ✅ **Completed:** Feature pipeline, PyTorch Dataset + DataLoader, first training run. |
-| **3** | ⏳ **Up Next:** IRSA, OIDC provider, ECR repos. | ✅ **Completed:** Transformer trained, Focal Loss, MLflow tracking, hyperparameter tuning. |
-| **4** | ⏳ **Pending:** CRD schema, kopf skeleton, Minikube. | 🔜 **Up Next:** FastAPI `/predict` service, Dockerfile, push to ECR. |
+| **3** | ✅ **Completed:** EKS control plane live (`argus-eks`). IRSA wired — pods assume `argus-operator-irsa` role via OIDC, smoke-tested with zero hardcoded credentials. ECR repos created for all 3 images. | ✅ **Completed:** Transformer trained, Focal Loss, MLflow tracking, hyperparameter tuning. |
+| **4** | 🔜 **Up Next:** CRD schema (`SpotResilientJob`), kopf operator skeleton, Minikube setup. | 🔜 **Up Next:** FastAPI `/predict` service, Dockerfile, push to ECR. |
 | **5** | ⏳ **Pending:** Operator core: cordon + reschedule. | ⏳ **Pending:** S3 checkpoint trigger, CIFAR-10 test job. |
 | **6** | ⏳ **Pending:** EKS full deploy, Helm chart, SQS wiring. | ⏳ **Pending:** Chaos testing, benchmark collection. |
 | **7** | ⏳ **Pending:** Prometheus + Grafana, GitHub Actions CI/CD. | ⏳ **Pending:** PR curves, evaluation report. |
