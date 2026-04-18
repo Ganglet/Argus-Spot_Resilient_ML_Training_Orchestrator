@@ -21,6 +21,7 @@ resource "aws_lambda_function" "price_collector" {
   environment {
     variables = {
       FEATURE_STORE_BUCKET = aws_s3_bucket.feature_store.id
+      # AWS_REGION is reserved — Lambda sets it automatically to the deployment region
     }
   }
 }
