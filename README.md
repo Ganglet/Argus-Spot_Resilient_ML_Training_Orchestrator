@@ -205,6 +205,30 @@ spec:
 
 ---
 
+## Git & Repository Best Practices
+
+To maintain repository health, size, and security, we strictly enforce the following rules regarding untracked files and git blob storage:
+
+**1. No Large Binary Files (`*.pt`, `*.pth`, `*.ckpt`)**
+- Why: Git is a version control system for *source code*, not a blob storage system for large model artifacts. Committing a 5MB+ PyTorch model (`spot_transformer.pt`) every time you train bloats the `.git` folder indefinitely because Git stores a full snapshot of every binary change forever.
+- Standard Practice: Model checkpoints must be saved locally to `ml/model/mlruns/` (which is git-ignored) and pushed to remote Cloud Storage (S3 `argus-checkpoints-...` or a remote MLflow registry) for versioning.
+
+**2. No Raw Datasets (`*.csv`, `*.json`)**
+- Why: Datasets change constantly and can become massive (GBs in scale). Committing `raw_spot_prices.csv` or `features.csv` creates enormous Git history files and violates the principle of data isolation.
+- Standard Practice: Scripts natively pull data from the S3 feature store bucket seamlessly. Code should *never* contain the data it runs on.
+
+**3. No Auto-Generated Assets (`*.png`, `*.db`)**
+- Why: Explanatory graphs (`eda_price_series.png`) or local MLflow databases (`mlruns.db`) are dynamically generated every time the script is executed. Tracking these causes perpetual merge conflicts between developers doing their own local testing.
+- Standard Practice: If graphs are needed for documentation, they should ideally be hosted externally or only committed to an exclusive `/docs/images` folder.
+
+**4. No Cloud Provider Binaries / Configs (`.terraform/`, `terraform.exe`, `*.zip`)**
+- Why: Committing Terraform state folders, provider binaries, or packaged lambda zips (`price_collector.zip`) breaks cross-platform compatibility (e.g. tracking a Windows `terraform.exe` binary will break for a Mac user cloning the repo).
+- Standard Practice: Every developer must `terraform init` their own providers locally.
+
+*Note: The `.gitignore` at the root of the repository explicitly filters these extensions. Ensure you do not use `git add -f` to forcibly track ignored entities.*
+
+---
+
 ## Cost Management
 
 | Phase | Real AWS used | Expected cost |
