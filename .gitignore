@@ -1,4 +1,4 @@
-# Terraform
+﻿# Terraform
 **/.terraform/
 *.tfstate
 *.tfstate.backup
@@ -16,7 +16,7 @@ build/
 .venv/
 venv/
 
-# AWS credentials — never commit these
+# AWS credentials ??? never commit these
 .aws/
 credentials
 
