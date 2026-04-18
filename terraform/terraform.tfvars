@@ -1,7 +1,0 @@
-# Copy this to terraform.tfvars and fill in your values.
-# terraform.tfvars is gitignored — never commit real values.
-
-aws_region  = "eu-north-1"
-project     = "argus"
-environment = "dev"
-alert_email = "panchakarma.pranalogic@gmail.com"
