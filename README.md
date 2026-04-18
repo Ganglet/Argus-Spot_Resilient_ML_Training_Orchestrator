@@ -24,11 +24,11 @@ EC2 Spot Price History
 
 | Layer | Owner | Status |
 |-------|-------|--------|
-| AWS Infrastructure (Terraform) | Person A | ✅ Week 1 & 2 complete |
-| Lambda price collector | Person A | ✅ Built (lambda.tf) |
+| AWS Infrastructure (VPC, S3, SQS, IAM) | Person A | ✅ Live in AWS |
+| Lambda price collector | Person A | 📝 Code written (pending `apply`) |
 | Kubernetes Operator (CRD + kopf) | Person A | Week 4–5 |
-| EKS Cluster | Person A | ✅ Built (eks.tf) |
-| ML Transformer model | Person B | ✅ Week 2-3 complete |
+| EKS Cluster | Person A | 📝 Code written (Week 6 deploy) |
+| ML Transformer model | Person B | ✅ Trained & ready locally |
 | FastAPI prediction service | Person B | Week 4 |
 | End-to-end integration | Both | Week 5–6 |
 
