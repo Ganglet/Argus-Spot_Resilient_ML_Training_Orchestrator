@@ -118,5 +118,5 @@ Base images:
 
 ---
 
-*Last updated: 2026-04-16*  
-*Agreed by: Person A — @Ganglet | Person B — TBD*
+*Last updated: 2026-04-18*  
+*Agreed by: Person A — @Ganglet | Person B — @Rayyan-Mohammed*
