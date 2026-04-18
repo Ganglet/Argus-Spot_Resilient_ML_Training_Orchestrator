@@ -246,13 +246,13 @@ To maintain repository health, size, and security, we strictly enforce the follo
 
 ## Week-by-Week Roadmap
 
-| Week | Person A | Person B |
-|------|----------|----------|
-| 1 | ✅ Terraform base infra, VPC, S3, SQS, IAM | ✅ Pull Spot price history, EDA |
-| 2 | ✅ EKS cluster, Lambda price collector live | ✅ Feature pipeline, PyTorch Dataset |
-| 3 | IRSA, OIDC, ECR repos | ✅ Model training, MLflow, threshold tuning |
-| 4 | CRD schema, kopf skeleton, Minikube | FastAPI /predict, Dockerfile, push to ECR |
-| 5 | Operator core: cordon + reschedule | S3 checkpoint trigger, CIFAR-10 test job |
-| 6 | EKS full deploy, Helm chart, SQS wiring | Chaos testing, benchmark collection |
-| 7 | Prometheus + Grafana, GitHub Actions CI/CD | PR curves, evaluation report |
-| 8 | ADRs, cost analysis, README polish | System paper, demo video |
+| Week | Person A (Infra / Operator) | Person B (ML / API) |
+|------|-----------------------------|---------------------|
+| **1** | ✅ **Completed:** Terraform base infra, VPC, S3, SQS, IAM deployed. | ✅ **Completed:** Pull Spot price history, initial EDA. |
+| **2** | ⏳ **Pending `apply`:** EKS cluster & Lambda code written, but deferred deployment to save costs. | ✅ **Completed:** Feature pipeline, PyTorch Dataset, dataloaders built. |
+| **3** | ⏳ **Pending:** IRSA, OIDC, ECR repos. | ✅ **Completed:** Model training (Transformer), MLflow tracking, focal loss, hyperparameter tuning. |
+| **4** | ⏳ **Pending:** CRD schema, kopf skeleton, Minikube. | 🔜 **Up Next:** FastAPI `/predict` service, Dockerfile, push to ECR. |
+| **5** | ⏳ **Pending:** Operator core: cordon + reschedule. | ⏳ **Pending:** S3 checkpoint trigger, CIFAR-10 test job. |
+| **6** | ⏳ **Pending:** EKS full deploy, Helm chart, SQS wiring. | ⏳ **Pending:** Chaos testing, benchmark collection. |
+| **7** | ⏳ **Pending:** Prometheus + Grafana, GitHub Actions CI/CD. | ⏳ **Pending:** PR curves, evaluation report. |
+| **8** | ⏳ **Pending:** ADRs, cost analysis, README polish. | ⏳ **Pending:** System paper, demo video. |
