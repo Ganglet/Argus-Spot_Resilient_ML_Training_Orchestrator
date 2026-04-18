@@ -37,3 +37,28 @@ output "public_subnet_ids" {
   description = "Public subnet IDs — used for load balancers"
   value       = [for s in aws_subnet.public : s.id]
 }
+
+output "ecr_operator_url" {
+  description = "ECR URL for operator image"
+  value       = aws_ecr_repository.operator.repository_url
+}
+
+output "ecr_predict_service_url" {
+  description = "ECR URL for prediction service image"
+  value       = aws_ecr_repository.predict_service.repository_url
+}
+
+output "ecr_training_job_url" {
+  description = "ECR URL for training job image"
+  value       = aws_ecr_repository.training_job.repository_url
+}
+
+output "eks_cluster_name" {
+  description = "EKS cluster name"
+  value       = aws_eks_cluster.main.name
+}
+
+output "operator_irsa_role_arn" {
+  description = "IRSA role ARN — annotate the K8s ServiceAccount with this"
+  value       = aws_iam_role.operator_irsa.arn
+}
