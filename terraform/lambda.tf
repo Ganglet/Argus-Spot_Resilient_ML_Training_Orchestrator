@@ -20,8 +20,7 @@ resource "aws_lambda_function" "price_collector" {
 
   environment {
     variables = {
-      BUCKET_NAME = aws_s3_bucket.feature_store.id
-      REGION      = var.aws_region
+      FEATURE_STORE_BUCKET = aws_s3_bucket.feature_store.id
     }
   }
 }
