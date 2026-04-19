@@ -30,7 +30,7 @@ EC2 Spot Price History
 | Kubernetes Operator (CRD + kopf) | Person A | ✅ CRD + skeleton complete — core logic Week 5 |
 | ML feature pipeline + EDA | Person B | ✅ Complete locally |
 | Transformer model (trained) | Person B | ✅ Trained locally, artifacts in S3 |
-| FastAPI prediction service | Person B | Week 4 |
+| FastAPI prediction service | Person B | ✅ Complete locally (FastAPI, Docker, Load Tested) |
 | End-to-end integration | Both | Week 5–6 |
 
 ---
@@ -191,8 +191,18 @@ Full details in [docs/contracts.md](docs/contracts.md).
 
 **FastAPI endpoint (Person B builds, Person A calls):**
 ```
+POST /predict
+{
+  "instance_type": "m5.xlarge",
+  "az": "eu-north-1a"
+}
+→ { "instance_type": "m5.xlarge", "az": "eu-north-1a", "risk_score": 0.82, "timestamp": "..." }
+
 GET /predict?instance_type=m5.xlarge&az=eu-north-1a
 → { "instance_type": "m5.xlarge", "az": "eu-north-1a", "risk_score": 0.82, "timestamp": "..." }
+
+GET /health
+→ { "status": "ok" }
 ```
 
 **S3 checkpoint path (Person B writes, Person A triggers flush):**
@@ -260,8 +270,8 @@ To maintain repository health, size, and security, we strictly enforce the follo
 | **1** | ✅ **Completed:** Terraform base infra — VPC, S3, SQS, IAM live in AWS. | ✅ **Completed:** Spot price history pull, initial EDA. |
 | **2** | ✅ **Completed:** Lambda price collector + EventBridge cron live — CSVs flowing into S3 every 5 min. EKS code written (`eks.tf`), deployment deferred to Week 6. | ✅ **Completed:** Feature pipeline, PyTorch Dataset + DataLoader, first training run. |
 | **3** | ✅ **Completed:** EKS control plane live (`argus-eks`). IRSA wired — pods assume `argus-operator-irsa` role via OIDC, smoke-tested with zero hardcoded credentials. ECR repos created for all 3 images. | ✅ **Completed:** Transformer trained, Focal Loss, MLflow tracking, hyperparameter tuning. |
-| **4** | ✅ **Completed:** `SpotResilientJob` CRD live on Minikube. kopf operator running — `on_create`, `on_update`, `on_delete`, and 60s `reconcile` timer all verified. | 🔜 **Up Next:** FastAPI `/predict` service, Dockerfile, push to ECR. |
-| **5** | 🔜 **Up Next:** Operator core — risk polling, checkpoint flush, cordon + reschedule. | ⏳ **Pending:** S3 checkpoint trigger, CIFAR-10 test job. |
+| **4** | ✅ **Completed:** `SpotResilientJob` CRD live on Minikube. kopf operator running — `on_create`, `on_update`, `on_delete`, and 60s `reconcile` timer all verified. | ✅ **Completed:** FastAPI `/predict` service, Dockerfile, push to ECR. |
+| **5** | 🔜 **Up Next:** Operator core — risk polling, checkpoint flush, cordon + reschedule. | 🔜 **Up Next:** S3 checkpoint trigger, CIFAR-10 test job. |
 | **6** | ⏳ **Pending:** EKS full deploy, Helm chart, SQS wiring. | ⏳ **Pending:** Chaos testing, benchmark collection. |
 | **7** | ⏳ **Pending:** Prometheus + Grafana, GitHub Actions CI/CD. | ⏳ **Pending:** PR curves, evaluation report. |
 | **8** | ⏳ **Pending:** ADRs, cost analysis, README polish. | ⏳ **Pending:** System paper, demo video. |
