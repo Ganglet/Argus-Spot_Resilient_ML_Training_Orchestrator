@@ -88,3 +88,11 @@ Running log of every non-trivial problem encountered and every key architectural
 **Problem:** Person B committed `spot_transformer.pt` (5.5MB), `raw_spot_prices.csv`, `features.csv`, and EDA PNG files before `.gitignore` rules were enforced. These bloat git history permanently — even after deletion, the blobs remain in `.git/objects`.  
 **Fix:** `git rm --cached` removed them from tracking. `.gitignore` updated to cover `ml/data/*.csv`, `ml/data/*.png`, `*.pt`.  
 **Lesson:** Run `git status` and review every file before `git add`. Never use `git add -A` without checking output first. The git history still contains these blobs — to fully purge, `git filter-branch` or `git filter-repo` would be needed (not worth it at this stage).
+
+---
+
+### P-008 — Minikube binary: wrong architecture (darwin_amd64 on arm64)
+**Week:** 4  
+**Problem:** `brew install minikube` installed the amd64 binary. `minikube start` failed with `PROVIDER_DOCKER_INCORRECT_ARCH: Cannot use amd64 minikube binary to start minikube cluster with Docker driver on arm64 machine`.  
+**Fix:** Downloaded native `darwin_arm64` binary directly from GitHub releases, installed to `/usr/local/bin/minikube`.  
+**Lesson:** Same root cause as P-001 (Terraform). On Apple Silicon, always verify binaries are arm64 — Homebrew bottles sometimes lag behind or install Rosetta-compatible builds.
