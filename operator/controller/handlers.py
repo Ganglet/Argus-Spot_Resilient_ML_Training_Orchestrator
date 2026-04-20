@@ -2,7 +2,12 @@
 Argus Operator — kopf event handlers.
 
 Week 4: stubs only.
-Week 5: full reconcile loop — risk polling, checkpoint flush, cordon, reschedule, SQS.
+Week 5: full reconcile loop — risk polling, S3 checkpoint trigger, cordon, reschedule, SQS.
+
+Checkpoint trigger mechanism (Person B's design):
+  Operator writes _FLUSH_TRIGGER marker to S3 → training pod polls every 100 batches →
+  detects marker → saves model.pt → deletes marker.
+  This keeps the operator decoupled from the training process internals.
 """
 
 import logging
@@ -12,7 +17,9 @@ import boto3
 import httpx
 import kopf
 
-from controller import checkpoint, scheduler, sqs_publisher
+from controller import scheduler, sqs_publisher
+
+logger = logging.getLogger(__name__)
 
 PREDICT_SERVICE_URL = os.environ.get("PREDICT_SERVICE_URL", "http://localhost:8000")
 RISK_THRESHOLD_DEFAULT = float(os.environ.get("RISK_THRESHOLD", "0.65"))
@@ -30,16 +37,36 @@ def _boto3_client(service: str):
     return boto3.client(service, **kwargs)
 
 
-logger = logging.getLogger(__name__)
+def trigger_s3_checkpoint(job_name: str, checkpoint_path: str) -> None:
+    """
+    Writes a _FLUSH_TRIGGER marker to S3 so the training pod saves a checkpoint.
+
+    Trigger key: {prefix}/_FLUSH_TRIGGER
+    where prefix is derived from checkpointPath: s3://{bucket}/{prefix}
+
+    The training pod (train.py) polls for this key every 100 batches,
+    flushes model.pt on detection, then deletes the marker.
+    """
+    path_clean = checkpoint_path.replace("s3://", "")
+    bucket, prefix = path_clean.split("/", 1)
+    trigger_key = f"{prefix}/_FLUSH_TRIGGER"
+
+    s3 = _boto3_client("s3")
+    try:
+        s3.put_object(Bucket=bucket, Key=trigger_key, Body=b"1")
+        logger.info(f"[CHECKPOINT] Trigger written → s3://{bucket}/{trigger_key}")
+    except Exception as e:
+        logger.error(f"[CHECKPOINT] Failed to write trigger for '{job_name}': {e}")
+        raise
 
 
 @kopf.on.create("argus.io", "v1", "spotresilientjobs")
 def on_create(spec, name, namespace, patch, **kwargs):
     logger.info(f"[CREATE] SpotResilientJob '{name}' in namespace '{namespace}'")
-    logger.info(f"  image:              {spec['image']}")
-    logger.info(f"  checkpointPath:     {spec['checkpointPath']}")
-    logger.info(f"  riskThreshold:      {spec.get('riskThreshold', RISK_THRESHOLD_DEFAULT)}")
-    logger.info(f"  instanceFallback:   {spec['instanceFallback']}")
+    logger.info(f"  image:            {spec['image']}")
+    logger.info(f"  checkpointPath:   {spec['checkpointPath']}")
+    logger.info(f"  riskThreshold:    {spec.get('riskThreshold', RISK_THRESHOLD_DEFAULT)}")
+    logger.info(f"  instanceFallback: {spec['instanceFallback']}")
 
     patch.status["phase"] = "Running"
     patch.status["lastRiskScore"] = 0.0
@@ -56,7 +83,6 @@ def on_update(spec, name, namespace, old, new, diff, **kwargs):
 @kopf.on.delete("argus.io", "v1", "spotresilientjobs")
 def on_delete(spec, name, namespace, **kwargs):
     logger.info(f"[DELETE] SpotResilientJob '{name}' deleted")
-    logger.info(f"  Final checkpointPath: {spec['checkpointPath']}")
 
 
 @kopf.timer("argus.io", "v1", "spotresilientjobs", interval=POLL_INTERVAL)
@@ -68,7 +94,6 @@ def reconcile(spec, name, namespace, status, patch, **kwargs):
     last_step = status.get("lastCheckpointStep", 0)
     instance_type = fallback_types[0]
 
-    # Skip if already mid-migration
     if current_phase in ("Checkpointing", "Migrating"):
         logger.info(f"[RECONCILE] '{name}' skipped — already in phase '{current_phase}'")
         return
@@ -83,38 +108,32 @@ def reconcile(spec, name, namespace, status, patch, **kwargs):
         response.raise_for_status()
         risk = response.json()
     except Exception as e:
-        logger.warning(f"[RECONCILE] '{name}' — failed to reach predict service: {e}")
+        logger.warning(f"[RECONCILE] '{name}' — predict service unreachable: {e}")
         return
 
     risk_score = risk["risk_score"]
     patch.status["lastRiskScore"] = risk_score
 
     logger.info(
-        f"[RECONCILE] '{name}' | risk={risk_score:.3f} threshold={risk_threshold} "
-        f"| phase={current_phase}"
+        f"[RECONCILE] '{name}' | risk={risk_score:.3f} threshold={risk_threshold} | phase={current_phase}"
     )
 
     if risk_score <= risk_threshold:
         return
 
-    # 2. Risk exceeded — begin checkpoint + migrate sequence
-    logger.warning(
-        f"[RECONCILE] '{name}' risk {risk_score:.3f} > {risk_threshold} — triggering migration"
-    )
+    # 2. Risk exceeded — checkpoint + migrate
+    logger.warning(f"[RECONCILE] '{name}' risk {risk_score:.3f} > {risk_threshold} — triggering migration")
 
-    # Checkpoint
     patch.status["phase"] = "Checkpointing"
-    next_step = last_step + 1
     try:
-        checkpoint.flush_checkpoint(name, checkpoint_path, next_step)
-        patch.status["lastCheckpointStep"] = next_step
-        logger.info(f"[RECONCILE] '{name}' checkpoint flushed at step {next_step}")
+        trigger_s3_checkpoint(name, checkpoint_path)
+        patch.status["lastCheckpointStep"] = last_step + 1
     except Exception as e:
-        logger.error(f"[RECONCILE] '{name}' checkpoint failed: {e}")
+        logger.error(f"[RECONCILE] '{name}' checkpoint trigger failed: {e}")
         patch.status["phase"] = "Failed"
         return
 
-    # Publish SQS risk event
+    # 3. Publish SQS risk event
     try:
         sqs_publisher.publish_risk_event(
             job_name=name,
@@ -126,7 +145,7 @@ def reconcile(spec, name, namespace, status, patch, **kwargs):
     except Exception as e:
         logger.warning(f"[RECONCILE] '{name}' SQS publish failed (non-fatal): {e}")
 
-    # Cordon node + reschedule pod
+    # 4. Cordon node + reschedule pod
     patch.status["phase"] = "Migrating"
     try:
         node_name = scheduler.get_pod_node(name, namespace)
