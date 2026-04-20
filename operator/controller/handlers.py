@@ -19,11 +19,27 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
 # On EKS (Week 6) the var is unset and boto3 hits real AWS via IRSA credentials.
 _AWS_ENDPOINT = os.environ.get("AWS_ENDPOINT_URL")
 
-def _boto3_client(service: str):
-    kwargs = {"region_name": os.environ.get("AWS_DEFAULT_REGION", "eu-north-1")}
-    if _AWS_ENDPOINT:
-        kwargs["endpoint_url"] = _AWS_ENDPOINT
-    return boto3.client(service, **kwargs)
+def trigger_s3_checkpoint(job_name: str, checkpoint_path: str):
+    """
+    Writes a flush trigger marker to the job's S3 namespace.
+    The training pod will detect this or we use it to signify checkpoint intent.
+    """
+    logger.info(f"Triggering S3 checkpoint for '{job_name}' at {checkpoint_path}")
+    s3 = _boto3_client('s3')
+    
+    # Parse s3://bucket/prefix
+    path_clean = checkpoint_path.replace("s3://", "")
+    if "/" in path_clean:
+        bucket, prefix = path_clean.split("/", 1)
+    else:
+        bucket, prefix = path_clean, "checkpoints"
+        
+    trigger_key = f"{prefix}/_FLUSH_TRIGGER"
+    try:
+        s3.put_object(Bucket=bucket, Key=trigger_key, Body=b"1")
+        logger.info(f"Successfully wrote checkpoint trigger to s3://{bucket}/{trigger_key}")
+    except Exception as e:
+        logger.error(f"Failed to write S3 checkpoint trigger: {e}")
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +111,7 @@ def reconcile(spec, name, namespace, status, patch, **kwargs):
     #
     # if risk["risk_score"] > risk_threshold:
     #     patch.status["phase"] = "Checkpointing"
-    #     checkpoint.flush(name, spec["checkpointPath"])
+    #     trigger_s3_checkpoint(name, spec["checkpointPath"])
     #     scheduler.cordon_node(node_name)
     #     scheduler.reschedule_pod(pod_spec, spec["instanceFallback"])
     #     sqs_publisher.publish(name, risk)
