@@ -4,8 +4,8 @@ metadata:
   name: cifar10-test
   namespace: default
 spec:
-  image: pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
-  command: [python, train.py]
+  image: cifar10-job:latest
+  command: ["python", "train.py"]
   checkpointPath: s3://argus-checkpoints-844641713781/checkpoints/cifar10-test
   checkpointIntervalSteps: 500
   riskThreshold: 0.65
