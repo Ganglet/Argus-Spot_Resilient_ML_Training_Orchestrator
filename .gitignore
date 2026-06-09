@@ -33,3 +33,9 @@ ml/data/*.png
 .env
 .env.local
 *.log
+
+# Docker image tarballs (transferred between machines, not tracked in git)
+*.tar
+*.tar.gz
+*.zip
+terraform.exe
