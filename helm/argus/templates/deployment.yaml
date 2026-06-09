@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-operator
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-operator
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-operator
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "controller.main"]
+          env:
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.aws.region }}
+            - name: CHECKPOINT_BUCKET
+              value: {{ .Values.aws.checkpointBucket }}
+            - name: RISK_EVENTS_QUEUE_URL
+              value: {{ .Values.aws.riskEventsQueueUrl }}
+            - name: PREDICT_SERVICE_URL
+              value: {{ .Values.operator.predictServiceUrl }}
+            - name: POLL_INTERVAL_SECONDS
+              value: "{{ .Values.operator.pollIntervalSeconds }}"
+            - name: RISK_THRESHOLD
+              value: "{{ .Values.operator.riskThreshold }}"
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
