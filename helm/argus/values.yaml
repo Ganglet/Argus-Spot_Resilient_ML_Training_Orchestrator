@@ -1,0 +1,26 @@
+image:
+  repository: 844641713781.dkr.ecr.eu-north-1.amazonaws.com/argus/operator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+operator:
+  pollIntervalSeconds: 60
+  riskThreshold: 0.65
+  predictServiceUrl: http://argus-predict-service:8000
+
+aws:
+  region: eu-north-1
+  checkpointBucket: argus-checkpoints-844641713781
+  riskEventsQueueUrl: https://sqs.eu-north-1.amazonaws.com/844641713781/argus-risk-events
+
+serviceAccount:
+  name: argus-operator
+  irsaRoleArn: arn:aws:iam::844641713781:role/argus-operator-irsa
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
