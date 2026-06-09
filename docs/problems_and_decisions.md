@@ -96,3 +96,35 @@ Running log of every non-trivial problem encountered and every key architectural
 **Problem:** `brew install minikube` installed the amd64 binary. `minikube start` failed with `PROVIDER_DOCKER_INCORRECT_ARCH: Cannot use amd64 minikube binary to start minikube cluster with Docker driver on arm64 machine`.  
 **Fix:** Downloaded native `darwin_arm64` binary directly from GitHub releases, installed to `/usr/local/bin/minikube`.  
 **Lesson:** Same root cause as P-001 (Terraform). On Apple Silicon, always verify binaries are arm64 — Homebrew bottles sometimes lag behind or install Rosetta-compatible builds.
+
+---
+
+### P-009 — SQS publish hits real AWS instead of LocalStack
+**Week:** 5  
+**Problem:** `.env.local` sets `AWS_ENDPOINT_URL=http://localhost:4566` but `_boto3_client()` in `handlers.py` only reads `AWS_ENDPOINT_URL` via `os.environ.get("AWS_ENDPOINT_URL")`. The SQS queue URL in `.env.local` is `http://localhost:4566/000000000000/argus-risk-events` (LocalStack format), but boto3 resolved the endpoint to `https://sqs.eu-north-1.amazonaws.com` and threw `InvalidAddress`.  
+**Fix (pending Week 6):** Pass `endpoint_url` explicitly in `_boto3_client()` when `AWS_ENDPOINT_URL` is set. Already done for S3 — apply same pattern to SQS.  
+**Impact:** SQS publish is non-fatal (wrapped in try/except with WARNING log), so integration test still passed. Fix before Week 6.
+
+---
+
+### P-010 — Minikube loses loaded images on restart
+**Week:** 5  
+**Problem:** `minikube image load` loads an image into Minikube's internal Docker daemon. When Minikube is stopped and restarted, the image is gone — the internal daemon is reset. This caused repeated `ErrImageNeverPull` errors after every Minikube restart.  
+**Fix:** Re-run `minikube image load argus/predict-service:latest` after every `minikube start`. For Week 6 this is moot — images come from ECR.  
+**Lesson:** Minikube's image cache is ephemeral. For persistent local dev, use a local registry (`minikube addons enable registry`) or always script the image load as part of startup.
+
+---
+
+### P-011 — Person B's image on different machine — `minikube image load` doesn't transfer
+**Week:** 5  
+**Problem:** Assumed `minikube image load` on Person B's machine would make the image available on Person A's Minikube. They run on separate laptops — completely separate Docker daemons and Minikube clusters. The image never arrived.  
+**Fix:** Person B exported with `docker save argus/predict-service:latest | gzip > predict-service.tar.gz`, transferred via WeTransfer, Person A loaded with `docker load` then `minikube image load`.  
+**Lesson:** For cross-machine image sharing, always use `docker save/load`. From Week 6 onward this is solved by ECR — both developers push/pull from the same registry.
+
+---
+
+### P-012 — Minikube cached old image despite `minikube image load` with new tar
+**Week:** 5  
+**Problem:** After loading a new version of `argus/predict-service:latest`, the running pod continued using the old image. `docker inspect` showed different SHA256 digests between local Docker and Minikube's internal daemon. `minikube image load` silently skipped the update because the tag already existed.  
+**Fix:** `kubectl delete deployment argus-predict-service` → `minikube ssh "docker rmi -f argus/predict-service:latest"` → `minikube image load argus/predict-service:latest` → `kubectl apply -f k8s/predict-service.yaml`.  
+**Lesson:** `minikube image load` does not force-replace existing tags. To update an image, always force-remove it from Minikube's daemon first.
