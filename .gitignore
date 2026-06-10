@@ -27,9 +27,26 @@ credentials
 mlruns/
 ml/data/*.csv
 ml/data/*.png
+/data/
+cifar-10-batches-py/
 
 # Misc
 .DS_Store
 .env
 .env.local
 *.log
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Binaries and Archives
+*.exe
+*.tar
+*.tar.gz
+*.zip
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/

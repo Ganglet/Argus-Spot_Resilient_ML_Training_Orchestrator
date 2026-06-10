@@ -1,26 +1,24 @@
-# CIFAR-10 Training Job & S3 Checkpointing
+# Operator Core Logic & CIFAR-10 Checkpointing
 
-**Phase:** Week 5 — Operator Core & Checkpointing  
-**Owner:** Person B  
-**Status:** Complete — Training job dockerized, checkpoint logic integrated, operator flush trigger added.
+**Phase:** Week 5 — Operator Core Logic [Both — first major integration]  
+**Owner:** Person B (and Joint Tasks)  
+**Status:** Complete — Full operator loop working on Minikube. Can submit a SpotResilientJob and see it survive a simulated interruption.
 
 ---
 
 ## Objective
 
-Build a standalone, interrupt-resilient training workload (CIFAR-10 image classification) that can save and resume state from S3. Implement the communication mechanism between the Kubernetes Operator (Person A's layer) and the training Pod (Person B's layer) to force an early checkpoint when spot risk is high.
+Deliver the first major end-to-end integration: the Operator successfully polling the FastAPI prediction service and communicating an early checkpoint trigger via S3 to the running PyTorch (CIFAR-10) training Pod.
 
 ---
 
-## What Was Done
+## What Was Done (Week 5 Integration)
 
-1. **`train.py` (PyTorch CNN)**: Built a PyTorch CIFAR-10 training script that actively loads from `s3://.../latest_checkpoint.pt` on spin-up and saves its state at the end of every epoch.
-2. **Graceful `SIGTERM` Handling**: Registered a signal handler in the Python script. When Kubernetes evicts the Pod due to a Spot interruption, it sends a `SIGTERM`. The script intercepts this and flushes the current model state to S3 before exiting.
-3. **Operator-to-Pod S3 Trigger**:
-   - Added logic in `operator/controller/handlers.py` to drop a `_FLUSH_TRIGGER` marker file in the job's S3 folder when the predictive model flags high risk.
-   - Added active micro-polling inside the inner training loop (every 100 batches) of `train.py` to check for this marker and flush the checkpoint early if it exists.
-4. **Dockerization**: Packaged the script and `boto3` dependencies into a standalone Dockerfile inside `ml/cifar10_job/`.
-5. **YAML Update**: Updated the demo `spotresilientjob.yaml` payload to use the newly created `cifar10-job:latest` container instead of the generic PyTorch image.
+1. **[Both] First integration session**: Deployed the FastAPI prediction service to Minikube, operator polls it.
+2. **[B] Implement S3 checkpoint trigger in operator**: Added `trigger_s3_checkpoint()` into `operator/controller/handlers.py` to call `boto3` and write a `_FLUSH_TRIGGER` object indicating high spot eviction risk to flush the checkpoint.
+3. **[B] Write test training job (CIFAR-10 in PyTorch)**: Built a training script (`train.py`) that checks for the S3 flush condition every 100 batches to support checkpoint resume, and dockerized it into `cifar10-job:latest`.
+4. **[Both] End-to-end test on Minikube**: Submitted `SpotResilientJob` → simulated high risk → verified checkpoint + reschedule.
+5. **[Both] Fix integration bugs**: Addressed environment discrepancies running LocalStack and Minikube. This week had the most debugging.
 
 ---
 
@@ -32,6 +30,7 @@ docker build -t cifar10-job:latest ml/cifar10_job/
 
 # Optional: Run locally without Docker
 export S3_BUCKET=argus-checkpoints-844641713781
+export AWS_ENDPOINT_URL=http://localhost:4566  # If testing with LocalStack
 python ml/cifar10_job/train.py
 ```
 
@@ -51,6 +50,6 @@ The S3 micro-polling handles predictive, preemptive safety (orchestrated by the 
 
 | Output | Description |
 |--------|-------------|
-| `ml/cifar10_job/train.py` | PyTorch training logic with checkpoint resume and S3 polling. |
-| `ml/cifar10_job/Dockerfile` | The container image definition for the job. |
 | Operator Logic (`handlers.py`) | Added `trigger_s3_checkpoint()` for the Operator. |
+| `ml/cifar10_job/train.py` | PyTorch training logic with checkpoint resume and S3 polling. |
+| `ml/cifar10_job/Dockerfile` | The container image definition for the CIFAR-10 job. |

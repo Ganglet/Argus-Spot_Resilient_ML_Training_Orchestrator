@@ -10,5 +10,5 @@ spec:
   checkpointIntervalSteps: 500
   riskThreshold: 0.65
   instanceFallback:
-    - m5.large
+    - m5.xlarge
     - c5.xlarge

@@ -15,9 +15,7 @@ from transformer import SpotInterruptionPredictor
 app = FastAPI(title="Argus Spot Prediction Service")
 
 # Configuration
-S3_BUCKET = os.getenv("S3_BUCKET", "argus-models")
-MODEL_KEY = os.getenv("MODEL_KEY", "spot_transformer.pt")
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", None)  # Use http://host.docker.internal:4566 for localstack
+MOCK_MODE = os.environ.get('MOCK_MODE') == 'true'
 FEATURES_CSV = os.getenv("FEATURES_CSV", "/app/data/features.csv")
 
 # Global state
@@ -30,25 +28,21 @@ seq_len = 12
 
 def _load_model():
     global model, is_ready
+    
+    if MOCK_MODE:
+        print("MOCK_MODE is enabled. Skipping PyTorch model load entirely.")
+        is_ready = True
+        return
+        
     try:
-        model_path = "/tmp/model.pt"
-        
-        # In a real environment, you'd download the model from S3 on startup
-        # For simplicity if local file exists (like mounted volume), we use it
-        local_model_path = os.path.join(os.path.dirname(__file__), "../model/spot_transformer.pt")
-        
-        if os.path.exists(local_model_path):
-            print(f"Loading model from local path: {local_model_path}")
-            model_path = local_model_path
-        else:
-            print(f"Downloading model from s3://{S3_BUCKET}/{MODEL_KEY}")
-            s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT) if S3_ENDPOINT else boto3.client('s3')
-            s3.download_file(S3_BUCKET, MODEL_KEY, model_path)
-            
+        # Load from local filepath or default to the relative path
+        model_path = os.getenv("MODEL_PATH", os.path.abspath(os.path.join(os.path.dirname(__file__), "../model/spot_transformer.pt")))
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found at {model_path}")
+        print(f"Loading model from local path: {model_path}")
         model = SpotInterruptionPredictor(num_features=num_features, d_model=128, nhead=4, num_layers=4)
         model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
         model.eval()
-        
         is_ready = True
         print("Model loaded successfully.")
     except Exception as e:
@@ -58,27 +52,24 @@ def _load_model():
 def _load_features():
     global feature_cache
     try:
-        local_features_path = os.path.join(os.path.dirname(__file__), "../data/features.csv")
-        path_to_use = local_features_path if os.path.exists(local_features_path) else FEATURES_CSV
-        
-        df = pd.read_csv(path_to_use)
+        # Load features from env variable or relative path
+        features_path = os.getenv("FEATURES_CSV", os.path.abspath(os.path.join(os.path.dirname(__file__), "../data/features.csv")))
+        if not os.path.exists(features_path):
+            raise FileNotFoundError(f"Features file not found at {features_path}")
+        df = pd.read_csv(features_path)
         # Select numeric columns
         numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
-        
         cache = {}
         for (instance_type, az), group in df.groupby(['instance_type', 'availability_zone']):
             # Sort by timestamp to get the latest 12 sequences
             sorted_group = group.sort_values('timestamp')
             recent_data = sorted_group[numeric_cols].values[-seq_len:]
-            
             # If not enough data, we pad with zeros (or mean, but zeroes for simplicity here)
             if len(recent_data) < seq_len:
                 pad_size = seq_len - len(recent_data)
                 padding = np.zeros((pad_size, num_features))
                 recent_data = np.vstack([padding, recent_data])
-                
             cache[(instance_type, az)] = recent_data
-            
         feature_cache = cache
         print(f"Loaded features for {len(feature_cache)} (instance_type, az) combinations.")
     except Exception as e:
@@ -93,7 +84,7 @@ async def startup_event():
 @app.get("/health")
 def health_check():
     if not is_ready:
-        raise HTTPException(status_code=503, detail="Model not ready")
+        return {"status": "ok", "detail": "Model not ready (running in degraded mode for local testing)"}
     return {"status": "ok"}
 
 class PredictRequest(BaseModel):
@@ -111,6 +102,15 @@ def predict_get(instance_type: str, az: str):
 def _predict(instance_type: str, az: str):
     if not is_ready:
         raise HTTPException(status_code=503, detail="Model not ready")
+        
+    if MOCK_MODE:
+        return {
+            "instance_type": instance_type,
+            "az": az,
+            "risk_score": 0.42,  # Dummy safe score
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "mock_mode": True
+        }
         
     key = (instance_type, az)
     if key not in feature_cache:

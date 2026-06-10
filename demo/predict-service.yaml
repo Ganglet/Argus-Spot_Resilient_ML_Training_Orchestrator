@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: predict-service
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: predict-service
+  template:
+    metadata:
+      labels:
+        app: predict-service
+    spec:
+      containers:
+        - name: api
+          image: argus/predict-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: predict-service
+  namespace: default
+spec:
+  selector:
+    app: predict-service
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000

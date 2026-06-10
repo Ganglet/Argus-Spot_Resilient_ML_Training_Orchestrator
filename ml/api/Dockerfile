@@ -5,12 +5,12 @@ WORKDIR /app
 COPY ml/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ml/model/transformer.py /model/transformer.py
-COPY ml/model/spot_transformer.pt /model/spot_transformer.pt
-COPY ml/data/features.csv /data/features.csv
+COPY ml/model/transformer.py /app/model/transformer.py
+COPY ml/model/spot_transformer.pt /app/model/spot_transformer.pt
+COPY ml/data/features.csv /app/data/features.csv
 COPY ml/api/app.py /app/api/app.py
 
-ENV PYTHONPATH="/model"
+ENV PYTHONPATH="/app/model"
 
 EXPOSE 8000
 
