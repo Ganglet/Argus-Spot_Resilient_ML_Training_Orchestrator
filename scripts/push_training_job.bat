@@ -1,0 +1,35 @@
+@echo off
+REM Build and push training-job image to ECR.
+REM Run this manually for Week 6 before CI/CD is live.
+REM Usage: scripts\push_training_job.bat [tag]
+
+setlocal
+
+set REGION=eu-north-1
+set ACCOUNT=844641713781
+set REPO=argus/training-job
+set TAG=%1
+if "%TAG%"=="" set TAG=latest
+set IMAGE=%ACCOUNT%.dkr.ecr.%REGION%.amazonaws.com/%REPO%:%TAG%
+
+echo Logging into ECR...
+aws ecr get-login-password --region %REGION% | docker login --username AWS --password-stdin %ACCOUNT%.dkr.ecr.%REGION%.amazonaws.com
+if errorlevel 1 goto :error
+
+echo Building training-job image...
+docker build -t "%IMAGE%" ml/cifar10_job/
+if errorlevel 1 goto :error
+
+echo Pushing %IMAGE%...
+docker push "%IMAGE%"
+if errorlevel 1 goto :error
+
+echo Done. Image: %IMAGE%
+goto :end
+
+:error
+echo Error occurred during build/push!
+exit /b 1
+
+:end
+endlocal

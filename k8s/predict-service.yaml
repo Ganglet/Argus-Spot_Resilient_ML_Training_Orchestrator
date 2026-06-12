@@ -22,8 +22,6 @@ spec:
           env:
             - name: MODEL_PATH
               value: /app/model.pt
-            - name: MOCK_MODE
-              value: "true"
           readinessProbe:
             httpGet:
               path: /health

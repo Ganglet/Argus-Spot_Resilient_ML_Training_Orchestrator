@@ -38,4 +38,8 @@ ml/data/*.png
 *.tar
 *.tar.gz
 *.zip
+
+# Executables and Binaries
+*.exe
+minikube.exe
 terraform.exe
