@@ -9,11 +9,10 @@
 # Apply eks.tf first, then this file.
 # ---------------------------------------------------------------------------
 
-# Tell AWS to trust the EKS cluster's OIDC provider
-data "aws_iam_openid_connect_provider" "eks" {
-  url = aws_eks_cluster.main.identity[0].oidc[0].issuer
-}
-
+# Register the EKS cluster's OIDC provider with IAM so pods can federate.
+# (A data-source lookup here was removed: it resolved the *new* issuer before
+# the provider existed, erroring at plan time on a fresh cluster. Nothing used
+# it — the role trust below references the resource, not a data source.)
 resource "aws_iam_openid_connect_provider" "eks" {
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
