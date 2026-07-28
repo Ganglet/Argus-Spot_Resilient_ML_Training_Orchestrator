@@ -39,3 +39,6 @@ ml/data/*.png
 *.tar.gz
 *.zip
 terraform.exe
+
+.terraform.tfstate.lock.info
+.terraform/
