@@ -108,7 +108,7 @@ resource "aws_eks_node_group" "spot_nodes" {
   capacity_type  = "SPOT"
 
   scaling_config {
-    desired_size = 0 # Starts at 0, spins up when requested
+    desired_size = var.spot_desired_size # 0 by default; set to 2 for the Week 6 reschedule test
     max_size     = 2
     min_size     = 0
   }

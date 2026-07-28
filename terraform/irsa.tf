@@ -70,9 +70,9 @@ resource "aws_iam_role_policy" "operator_irsa" {
         ]
       },
       {
-        Sid    = "RiskEventQueue"
-        Effect = "Allow"
-        Action = ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Sid      = "RiskEventQueue"
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
         Resource = aws_sqs_queue.risk_events.arn
       }
     ]
