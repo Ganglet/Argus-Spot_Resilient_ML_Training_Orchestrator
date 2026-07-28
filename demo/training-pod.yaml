@@ -1,0 +1,43 @@
+# Training pod for the SpotResilientJob "cifar10-test".
+#
+# The operator does NOT create this — it only *watches* for a pod named exactly
+# "cifar10-test" (= the CRD name; scheduler.get_pod_node/reschedule_pod address
+# it by that name) with label argus.io/job=cifar10-test. When risk > threshold
+# it cordons this pod's node and deletes the pod.
+#
+# It's a bare Pod (not a Deployment/Job) because the operator targets that exact
+# name — a controller would generate hashed pod names it can't find. To show
+# resume-from-checkpoint after the operator deletes it, just re-apply this file:
+# train.py's load_checkpoint() pulls the latest checkpoint from S3 and resumes
+# at epoch+1 instead of restarting from scratch.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cifar10-test
+  namespace: default
+  labels:
+    argus.io/job: cifar10-test
+spec:
+  # Reuse the operator's IRSA-bound ServiceAccount: its role has S3 checkpoint
+  # read/write, and its trust is scoped to this SA — so the pod can assume it to
+  # load/save checkpoints without static credentials.
+  serviceAccountName: argus-operator
+  nodeSelector:
+    workload: ml-training           # schedule onto the m7i-flex workload nodes
+  restartPolicy: Never
+  containers:
+    - name: train
+      image: 844641713781.dkr.ecr.eu-north-1.amazonaws.com/argus/training-job:latest
+      imagePullPolicy: IfNotPresent
+      # AWS_ENDPOINT_URL intentionally left UNSET so boto3 hits real AWS.
+      env:
+        - name: EPOCHS          # override baked-in 5 → long run so we can
+          value: "30"           # interrupt mid-training for the migration demo
+        - name: PYTHONUNBUFFERED # stream train.py logs live (no buffering)
+          value: "1"
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          memory: "4Gi"

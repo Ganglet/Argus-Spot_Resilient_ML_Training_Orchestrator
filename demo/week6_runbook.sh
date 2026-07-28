@@ -59,7 +59,9 @@ cmd_deploy() {
   log "Logging in to ECR + pushing operator image"
   aws ecr get-login-password --region "$REGION" \
     | docker login --username AWS --password-stdin "$REGISTRY"
-  docker build -t "$REGISTRY/$OPERATOR_REPO:latest" "$PROJECT_ROOT/operator/"
+  # --platform linux/amd64: the EKS nodes are amd64; an Apple-Silicon build
+  # host would otherwise produce an arm64 image → "exec format error" crash.
+  docker build --platform linux/amd64 -t "$REGISTRY/$OPERATOR_REPO:latest" "$PROJECT_ROOT/operator/"
   docker push "$REGISTRY/$OPERATOR_REPO:latest"
 
   warn "Person B must have pushed argus/predict-service + argus/training-job to ECR."
