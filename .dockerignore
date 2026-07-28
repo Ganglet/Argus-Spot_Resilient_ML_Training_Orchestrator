@@ -1,0 +1,11 @@
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+ml/model/mlruns/
+ml/model/mlruns.db
+ml/data/eda_*.png
+node_modules/
+*.tar
+*.tar.gz

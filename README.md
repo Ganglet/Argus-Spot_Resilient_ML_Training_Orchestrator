@@ -10,7 +10,7 @@ EC2 Spot Price History
         │  writes CSVs
         ▼
   S3 Feature Store ──► ML Model (Person B) ──► FastAPI /predict
-                                                        │
+                                                         │
                                           Kubernetes Operator (Person A)
                                                         │
                               ┌─────────────────────────┼──────────────────────┐
@@ -274,7 +274,6 @@ To maintain repository health, size, and security, we strictly enforce the follo
 | **3** | ✅ **Completed:** EKS control plane live (`argus-eks`). IRSA wired — pods assume `argus-operator-irsa` role via OIDC, smoke-tested with zero hardcoded credentials. ECR repos created for all 3 images. | ✅ **Completed:** Transformer trained, Focal Loss, MLflow tracking, hyperparameter tuning. |
 | **4** | ✅ **Completed:** `SpotResilientJob` CRD live on Minikube. kopf operator running — `on_create`, `on_update`, `on_delete`, and 60s `reconcile` timer all verified. | ✅ **Completed:** FastAPI `/predict` service, Dockerfile, push to ECR. |
 | **5** | ✅ **Completed:** Full reconcile loop — risk polling, `_FLUSH_TRIGGER` S3 marker, cordon + reschedule, SQS publish. Integration test passed on Minikube. | ✅ **Completed:** CIFAR-10 training job with S3 checkpoint/resume, SIGTERM handler, `_FLUSH_TRIGGER` polling, MOCK_MODE for local dev. |
-| **6** | 🔜 **Up Next:** EKS full deploy, Helm chart, real Spot instances. | 🔜 **Up Next:** Real model on EKS, chaos testing, benchmark collection. |
-| **6** | ⏳ **Pending:** EKS full deploy, Helm chart, SQS wiring. | ⏳ **Pending:** Chaos testing, benchmark collection. |
+| **6** | ✅ **Completed:** N/A <br> ⏳ **Pending:** EKS full deploy, Helm chart, Spot node group, SQS wiring, Trigger real interruption. | ✅ **Completed:** FastAPI real model integration, Operator Prometheus metrics, ECR build scripts. <br> ⏳ **Pending:** Trigger real interruption, verify end-to-end resilience loop, benchmark collection. |
 | **7** | ⏳ **Pending:** Prometheus + Grafana, GitHub Actions CI/CD. | ⏳ **Pending:** PR curves, evaluation report. |
 | **8** | ⏳ **Pending:** ADRs, cost analysis, README polish. | ⏳ **Pending:** System paper, demo video. |
