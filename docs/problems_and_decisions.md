@@ -96,3 +96,119 @@ Running log of every non-trivial problem encountered and every key architectural
 **Problem:** `brew install minikube` installed the amd64 binary. `minikube start` failed with `PROVIDER_DOCKER_INCORRECT_ARCH: Cannot use amd64 minikube binary to start minikube cluster with Docker driver on arm64 machine`.  
 **Fix:** Downloaded native `darwin_arm64` binary directly from GitHub releases, installed to `/usr/local/bin/minikube`.  
 **Lesson:** Same root cause as P-001 (Terraform). On Apple Silicon, always verify binaries are arm64 — Homebrew bottles sometimes lag behind or install Rosetta-compatible builds.
+
+---
+
+### P-009 — SQS publish hits real AWS instead of LocalStack
+**Week:** 5  
+**Problem:** `.env.local` sets `AWS_ENDPOINT_URL=http://localhost:4566` but `_boto3_client()` in `handlers.py` only reads `AWS_ENDPOINT_URL` via `os.environ.get("AWS_ENDPOINT_URL")`. The SQS queue URL in `.env.local` is `http://localhost:4566/000000000000/argus-risk-events` (LocalStack format), but boto3 resolved the endpoint to `https://sqs.eu-north-1.amazonaws.com` and threw `InvalidAddress`.  
+**Fix (pending Week 6):** Pass `endpoint_url` explicitly in `_boto3_client()` when `AWS_ENDPOINT_URL` is set. Already done for S3 — apply same pattern to SQS.  
+**Impact:** SQS publish is non-fatal (wrapped in try/except with WARNING log), so integration test still passed. Fix before Week 6.
+
+---
+
+### P-010 — Minikube loses loaded images on restart
+**Week:** 5  
+**Problem:** `minikube image load` loads an image into Minikube's internal Docker daemon. When Minikube is stopped and restarted, the image is gone — the internal daemon is reset. This caused repeated `ErrImageNeverPull` errors after every Minikube restart.  
+**Fix:** Re-run `minikube image load argus/predict-service:latest` after every `minikube start`. For Week 6 this is moot — images come from ECR.  
+**Lesson:** Minikube's image cache is ephemeral. For persistent local dev, use a local registry (`minikube addons enable registry`) or always script the image load as part of startup.
+
+---
+
+### P-011 — Person B's image on different machine — `minikube image load` doesn't transfer
+**Week:** 5  
+**Problem:** Assumed `minikube image load` on Person B's machine would make the image available on Person A's Minikube. They run on separate laptops — completely separate Docker daemons and Minikube clusters. The image never arrived.  
+**Fix:** Person B exported with `docker save argus/predict-service:latest | gzip > predict-service.tar.gz`, transferred via WeTransfer, Person A loaded with `docker load` then `minikube image load`.  
+**Lesson:** For cross-machine image sharing, always use `docker save/load`. From Week 6 onward this is solved by ECR — both developers push/pull from the same registry.
+
+---
+
+### P-012 — Minikube cached old image despite `minikube image load` with new tar
+**Week:** 5  
+**Problem:** After loading a new version of `argus/predict-service:latest`, the running pod continued using the old image. `docker inspect` showed different SHA256 digests between local Docker and Minikube's internal daemon. `minikube image load` silently skipped the update because the tag already existed.  
+**Fix:** `kubectl delete deployment argus-predict-service` → `minikube ssh "docker rmi -f argus/predict-service:latest"` → `minikube image load argus/predict-service:latest` → `kubectl apply -f k8s/predict-service.yaml`.  
+**Lesson:** `minikube image load` does not force-replace existing tags. To update an image, always force-remove it from Minikube's daemon first.
+
+---
+
+### ADR-005 — Workload node group is On-Demand `m7i-flex.large`, not Spot
+**Decision:** The "spot" node group (`aws_eks_node_group.spot_nodes`) runs `capacity_type = ON_DEMAND` on a single Free-Tier-eligible type, `m7i-flex.large`.
+**Why:** The AWS account is hard-restricted to Free-Tier-eligible instance types (see P-013). Real Spot never fulfilled, and non-free-tier types are rejected outright. `m7i-flex.large` (2 vCPU / 8 GB, x86) is the largest Free-Tier-eligible type in eu-north-1 and matches Person B's amd64 images.
+**Impact:** The Week 6 interruption is *simulated* via the operator's cordon+delete rather than a real Spot reclaim. The migration mechanism is identical; only the trigger differs. Revert to `SPOT` + ML instance types once the account restriction is lifted or a different account is used. The resource is still named `spot_nodes` and keeps `lifecycle=spot` labels so manifests/selectors are unchanged.
+
+---
+
+### P-013 — AWS account is Free-Tier-restricted: only Free-Tier instance types will launch
+**Week:** 6  
+**Problem:** Every workload node group creation hung ~20 min in `CREATING` (no ASG, no health error) then failed `CREATE_FAILED`. Tried `g4dn.xlarge` (spot), `m5.xlarge`/`c5.xlarge` (spot and on-demand), `t3.xlarge` — all failed identically. The system node group (`t3.small`) always worked. Spot quota (32 vCPU) and on-demand quota (16 vCPU) were both fine; zero instances ever launched.  
+**Root cause:** The final error surfaced it: `InvalidParameterCombination - The specified instance type is not eligible for Free Tier`. The account can only launch Free-Tier-eligible types. This is the same wall as P-006 (`t3.medium`), not understood as account-wide at the time.  
+**Fix:** `aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true` → allowed types in eu-north-1 are `t3.micro/small`, `t4g.micro/small` (ARM), `c7i-flex.large` (4 GB), `m7i-flex.large` (8 GB). Switched workload nodes to `m7i-flex.large` (x86, 8 GB) → launched in 1m41s.  
+**Lesson:** On a restricted account, `describe-instance-types --filters Name=free-tier-eligible,Values=true` is the source of truth for what will launch. A node group stuck in `CREATING` with **no ASG and no health issue** is the signature of the launch being rejected before the ASG is even created. Do not use `t4g` (ARM) if the images are x86.
+
+---
+
+### P-014 — Operator image built for wrong architecture (arm64 on Apple Silicon → amd64 nodes)
+**Week:** 6  
+**Problem:** Operator pod crash-looped on EKS with `exec /usr/local/bin/python: exec format error`. The runbook `deploy` ran `docker build` on an Apple-Silicon Mac, producing an **arm64** image; the EKS nodes are **amd64**.  
+**Fix:** `docker build --platform linux/amd64 …` (baked into `week6_runbook.sh`), pushed, `helm upgrade --set image.pullPolicy=Always` + rollout restart to force the node to re-pull. Person B's predict-service/training-job images were already amd64 (verified via `docker buildx imagetools inspect`).  
+**Lesson:** Always `--platform linux/amd64` when building on Apple Silicon for x86 nodes. `:latest` + `IfNotPresent` will silently reuse a cached wrong-arch image — force `Always` (or a digest) after a rebuild.
+
+---
+
+### P-015 — Circular import crashed the operator (introduced by the P-009 fix)
+**Week:** 6  
+**Problem:** After the arch fix, the operator crashed with `ImportError: cannot import name '_boto3_client' from partially initialized module 'controller.handlers' (circular import)`. `handlers.py` imports `sqs_publisher` at module load; `sqs_publisher.py` imported `_boto3_client` from `handlers` at module load — a cycle. This was introduced by the P-009 fix (routing SQS through `handlers._boto3_client`) and never run on a live operator (Week 5 passed before it).  
+**Fix:** Moved the `from controller.handlers import _boto3_client` in `sqs_publisher.py` from module level into `publish_risk_event()` (deferred import).  
+**Lesson:** A "fix applied but never executed" is not a fix. Deferred (function-level) imports are the standard break for two modules that must reference each other.
+
+---
+
+### P-016 — predict-service Dockerfile path bug → `/health` 503 (Person B)
+**Week:** 6  
+**Problem:** predict-service pod ran but `/health` returned 503; logs showed `No such file or directory: /app/data/features.csv`. `ml/api/Dockerfile` copied the model + 95 MB features.csv to `/data/` and `/model/` (container root), but `app.py` reads `/app/data/` and `/app/model/`. The model-load fall-through to a nonexistent `argus-models` S3 bucket is what actually drove the 503.  
+**Fix (Person B):** Corrected the Dockerfile COPY destinations, added `.dockerignore`, rebuilt and pushed. Person A fixed the stale Minikube manifest (`k8s/predict-service.yaml`): ECR image ref + `imagePullPolicy: Always`, and removed the dead `MODEL_PATH=/app/model.pt` (wrong path) and `MOCK_MODE` (removed from code in Week 6) env overrides so the verified baked-in defaults win.  
+**Lesson:** Data + model are baked into the image by design (sub-2s pod ready). Test the *container's* absolute paths, not just local runs where CWD hides the mismatch.
+
+---
+
+### P-017 — predict-service 404 for `m5.large` — model has no features for that type/AZ
+**Week:** 6  
+**Problem:** With predict-service healthy, the operator got `404: No historical features found for this instance type & AZ` querying `instance_type=m5.large, az=eu-north-1a` (from `instanceFallback[0]`).  
+**Fix:** Probed the endpoint — the model has real features for `m5.xlarge`, `m5.2xlarge`, `c5.xlarge`, `g4dn.xlarge` (all AZs), not `m5.large`. Changed `instanceFallback[0]` to `m5.xlarge` in `demo/spotresilientjob.yaml`.  
+**Lesson:** The operator's `/predict` query is driven by `instanceFallback[0]` + a hardcoded `az=eu-north-1a`. That combo must exist in the training features or the risk poll 404s.
+
+---
+
+### P-018 — No training-pod manifest; operator only watches, doesn't create it
+**Week:** 6  
+**Problem:** The operator manages a pod named exactly `cifar10-test` (by CRD name) but never creates it — no Pod/Job manifest existed in the repo. Also each new training pod re-downloads CIFAR-10 (~170 MB) at startup, ~15–30 min on the slow source, with no node-local cache.  
+**Fix:** Hand-wrote `demo/training-pod.yaml` — a bare Pod named `cifar10-test`, label `argus.io/job=cifar10-test`, ECR training image, `serviceAccountName: argus-operator` (reuses the operator's IRSA role for S3 checkpoint access), `nodeSelector: workload=ml-training`. Added `EPOCHS=30` + `PYTHONUNBUFFERED=1` for a long, observable run.  
+**Lesson:** Bare Pod (not Deployment/Job) is required because the operator addresses the pod by exact name. Deleting it (reschedule) does not auto-recreate — resume is shown by re-applying the manifest, which loads the S3 checkpoint. For faster demos, cache the dataset on a node-local volume.
+
+---
+
+## Week 6 — Live Validation on Real EKS (PASSED, 2026-07-28)
+
+First end-to-end run on **real EKS** (not Minikube). Full stack live: EKS cluster + `m7i-flex.large` nodes, operator (amd64) via Helm, real predict-service (real model + features), real training pod — all using **IRSA (zero static credentials)**, verified: `sts get-caller-identity` → `assumed-role/argus-operator-irsa/...` for both operator and training pod.
+
+**Migration event** (forced by lowering `riskThreshold` 0.65→0.01 since the real model returned 0.0419) — one reconcile, all steps on real AWS:
+
+| Step | Evidence | Δt |
+|------|----------|----|
+| Risk detected > threshold | operator log, real model score `0.0419` | — |
+| Checkpoint flush | `_FLUSH_TRIGGER` written to real S3 | +0 ms |
+| Risk event published | real SQS message (payload below) | +48 ms |
+| Node cordoned | `ip-10-0-1-14` → `unschedulable=true` | +84 ms |
+| Pod deleted | `cifar10-test` removed | +112 ms |
+| Rescheduled to healthy node | recreated pod placed on `ip-10-0-2-220` (cordoned node avoided) | — |
+
+Detection → full migration: **~112 ms**. SQS payload:
+```json
+{"job_name": "cifar10-test", "risk_score": 0.0419, "instance_type": "m5.xlarge",
+ "az": "eu-north-1a", "timestamp": "2026-07-28T17:55:47Z", "recommended_action": "checkpoint_and_migrate"}
+```
+Resume-from-checkpoint validated: real `latest_checkpoint.pt` written to S3 by training via IRSA; `train.py load_checkpoint()` resumes at epoch+1 (confirmed earlier tonight and by Person B locally).
+
+**Cost note:** EKS torn down to $0 after the run (`terraform destroy` of node groups + control plane; S3/SQS/Lambda/IAM retained).
+
+**Open for the paper (NeurIPS ML4Sys 2026 poster):** the model returned a flat `0.0419` for every instance type/AZ — prediction discrimination is unproven and must be validated (AUC / lead-time / vs a reactive baseline) before the "predictive" claim holds. The systems layer is validated; the ML claim is not yet.

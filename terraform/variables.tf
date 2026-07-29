@@ -27,3 +27,14 @@ variable "alert_email" {
   description = "Email address for billing alarms"
   type        = string
 }
+
+# Spot node count. Default 0 keeps the cluster free-by-default — no Spot EC2
+# runs until a test explicitly overrides this. The Week 6 interruption test
+# needs 2: the reschedule path deletes the pod so it can land on a *second*
+# non-cordoned node. Set via `terraform apply -var spot_desired_size=2` only
+# during a billed test window, then destroy.
+variable "spot_desired_size" {
+  description = "Desired Spot node count (0 = off; 2 for the Week 6 reschedule test)"
+  type        = number
+  default     = 0
+}

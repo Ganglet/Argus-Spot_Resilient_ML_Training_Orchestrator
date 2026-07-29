@@ -9,8 +9,6 @@ import json
 import logging
 import os
 
-from controller.handlers import _boto3_client
-
 logger = logging.getLogger(__name__)
 
 QUEUE_URL = os.environ.get(
@@ -42,6 +40,10 @@ def publish_risk_event(
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         "recommended_action": action,
     }
+
+    # Imported here, not at module top, to break a circular import:
+    # handlers.py imports this module, and _boto3_client is defined in handlers.py.
+    from controller.handlers import _boto3_client
 
     sqs = _boto3_client("sqs")
     sqs.send_message(
