@@ -43,3 +43,6 @@ ml/data/*.png
 *.exe
 minikube.exe
 terraform.exe
+
+.terraform.tfstate.lock.info
+.terraform/

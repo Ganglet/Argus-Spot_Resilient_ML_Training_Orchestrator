@@ -103,14 +103,20 @@ resource "aws_eks_node_group" "spot_nodes" {
   node_role_arn   = aws_iam_role.eks_nodes.arn
   subnet_ids      = [for s in aws_subnet.public : s.id]
 
-  # ML Instance defaults. (Fallback will be handled by Operator logic later)
-  instance_types = ["g4dn.xlarge", "m5.xlarge", "c5.xlarge"]
-  capacity_type  = "SPOT"
+  # On-Demand m7i-flex.large. ROOT CAUSE (2026-07-28, extends P-006): this AWS
+  # account is HARD-RESTRICTED to Free-Tier-eligible instance types — any other
+  # type fails with "InvalidParameterCombination: not eligible for Free Tier"
+  # and the node group hangs ~20 min then CREATE_FAILED. That killed every
+  # g4dn/m5/c5/t3.xlarge attempt (spot AND on-demand). m7i-flex.large is the
+  # largest Free-Tier-eligible x86 type here: 2 vCPU / 8 GB — enough for the CPU
+  # CIFAR-10 job + predict-service + operator. Only Free-Tier types will launch.
+  instance_types = ["m7i-flex.large"]
+  capacity_type  = "ON_DEMAND"
 
   scaling_config {
-    desired_size = 0 # Starts at 0, spins up when requested
+    desired_size = var.spot_desired_size # 0 by default; set to 2 for the Week 6 reschedule test
     max_size     = 2
-    min_size     = 0
+    min_size     = 1 # mirror the working system node group (was 0)
   }
 
   labels = {

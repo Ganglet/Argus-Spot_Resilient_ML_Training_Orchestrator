@@ -15,13 +15,13 @@ spec:
     spec:
       containers:
         - name: predict-service
-          image: argus/predict-service:latest
-          imagePullPolicy: Never          # use Minikube's local image registry
+          image: 844641713781.dkr.ecr.eu-north-1.amazonaws.com/argus/predict-service:latest
+          imagePullPolicy: Always         # pull Person B's fixed :latest from ECR
           ports:
             - containerPort: 8000
-          env:
-            - name: MODEL_PATH
-              value: /app/model.pt
+          # No env overrides: MOCK_MODE was removed in Week 6, and MODEL_PATH here
+          # pointed at the wrong path (/app/model.pt vs the app's /app/model/...).
+          # The image's baked-in defaults for model + features are verified-correct.
           readinessProbe:
             httpGet:
               path: /health

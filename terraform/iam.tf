@@ -137,9 +137,9 @@ resource "aws_iam_user_policy" "person_b" {
       },
       {
         # Read Spot price CSVs from feature store (model training input)
-        Sid      = "FeatureStoreRead"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:ListBucket"]
+        Sid    = "FeatureStoreRead"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:ListBucket"]
         Resource = [
           aws_s3_bucket.feature_store.arn,
           "${aws_s3_bucket.feature_store.arn}/*"

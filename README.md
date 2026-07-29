@@ -10,7 +10,7 @@ EC2 Spot Price History
         │  writes CSVs
         ▼
   S3 Feature Store ──► ML Model (Person B) ──► FastAPI /predict
-                                                         │
+                                                        │
                                           Kubernetes Operator (Person A)
                                                         │
                               ┌─────────────────────────┼──────────────────────┐
@@ -33,7 +33,7 @@ EC2 Spot Price History
 | FastAPI prediction service | Person B | ✅ Complete — MOCK_MODE for local dev |
 | CIFAR-10 training job (checkpoint/resume) | Person B | ✅ Complete — S3 trigger polling, SIGTERM handler |
 | End-to-end integration (Minikube) | Both | ✅ Passed — Week 5 complete |
-| EKS deployment + real Spot instances | Both | Week 6 |
+| EKS deployment + live migration (real EKS, IRSA) | Both | ✅ Validated on real EKS (2026-07-28) — On-Demand nodes; real Spot deferred (Free-Tier account, ADR-005) |
 
 ---
 
@@ -274,6 +274,6 @@ To maintain repository health, size, and security, we strictly enforce the follo
 | **3** | ✅ **Completed:** EKS control plane live (`argus-eks`). IRSA wired — pods assume `argus-operator-irsa` role via OIDC, smoke-tested with zero hardcoded credentials. ECR repos created for all 3 images. | ✅ **Completed:** Transformer trained, Focal Loss, MLflow tracking, hyperparameter tuning. |
 | **4** | ✅ **Completed:** `SpotResilientJob` CRD live on Minikube. kopf operator running — `on_create`, `on_update`, `on_delete`, and 60s `reconcile` timer all verified. | ✅ **Completed:** FastAPI `/predict` service, Dockerfile, push to ECR. |
 | **5** | ✅ **Completed:** Full reconcile loop — risk polling, `_FLUSH_TRIGGER` S3 marker, cordon + reschedule, SQS publish. Integration test passed on Minikube. | ✅ **Completed:** CIFAR-10 training job with S3 checkpoint/resume, SIGTERM handler, `_FLUSH_TRIGGER` polling, MOCK_MODE for local dev. |
-| **6** | ✅ **Completed:** N/A <br> ⏳ **Pending:** EKS full deploy, Helm chart, Spot node group, SQS wiring, Trigger real interruption. | ✅ **Completed:** FastAPI real model integration, Operator Prometheus metrics, ECR build scripts. <br> ⏳ **Pending:** Trigger real interruption, verify end-to-end resilience loop, benchmark collection. |
+| **6** | ✅ **Completed:** Deployed to **real EKS** — Helm-installed operator (amd64), IRSA verified (zero static creds). Live migration chain validated end-to-end: risk poll → `_FLUSH_TRIGGER` to real S3 → SQS event → cordon → reschedule to a healthy node (~112 ms). Torn down to $0 after. *Nodes are On-Demand `m7i-flex.large` — account is Free-Tier-restricted, so real Spot is deferred (interruption simulated via cordon; see ADR-005 / P-013).* | ✅ **Completed:** Real model + real predict-service on EKS, real checkpoint written to S3 via IRSA, resume-from-checkpoint validated. ⏳ **Remaining:** prediction-model discrimination (flat 0.0419 score) + benchmark table vs a reactive baseline. |
 | **7** | ⏳ **Pending:** Prometheus + Grafana, GitHub Actions CI/CD. | ⏳ **Pending:** PR curves, evaluation report. |
 | **8** | ⏳ **Pending:** ADRs, cost analysis, README polish. | ⏳ **Pending:** System paper, demo video. |
