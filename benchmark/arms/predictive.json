@@ -1,0 +1,9 @@
+{
+  "name": "predictive",
+  "checkpoint_mode": "predictive",
+  "step_budget": 200,
+  "risk_lead_seconds": 300,
+  "risk_trigger_file": "RISK",
+  "migrates_on_risk": true,
+  "_note": "risk_lead_seconds is a placeholder lead time ahead of the simulated interruption; Track 3 will supply the model's real measured lead time once it stops returning a flat 0.0419 score."
+}
