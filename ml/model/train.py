@@ -2,10 +2,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import os
+import json
+import joblib
 import mlflow
 import mlflow.pytorch
+from sklearn.metrics import average_precision_score
 from dataset import create_dataloaders
 from transformer import SpotInterruptionPredictor
+from feature_config import FEATURE_COLUMNS, SEQ_LENGTH
 
 class FocalLoss(nn.Module):
     """
@@ -40,37 +44,60 @@ def train_model():
     print(f"Executing Training Loop on {device}... This might take a bit.")
 
     # 1. Build DataLoader
-    train_loader, val_loader, input_features = create_dataloaders(
+    batch_size = 128
+    train_loader, val_loader, input_features, scaler = create_dataloaders(
         csv_path=features_csv,
-        batch_size=64,
+        batch_size=batch_size,
         train_split=0.8
     )
 
     # 2. Define Model (from transformer.py)
-    model = SpotInterruptionPredictor(num_features=input_features, d_model=128, nhead=4, num_layers=4)
+    # d_model=128, nhead=2, num_layers=2, lr=5e-4 — the config hyperparameter_tune.py's
+    # grid search found best (see docs/B3_model_training.md), and ~2x cheaper per batch
+    # than the 4-head/4-layer config this script used to hardcode.
+    d_model, nhead, num_layers, lr = 128, 2, 2, 5e-4
+    model = SpotInterruptionPredictor(num_features=input_features, d_model=d_model, nhead=nhead, num_layers=num_layers)
     model.to(device)
 
     # 3. Handle Imbalance with Focal Loss
     criterion = FocalLoss(alpha=0.75, gamma=2.0)
-    optimizer = optim.AdamW(model.parameters(), lr=0.001)
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    # 4. Training Loop (First Run - Verify Loss Decreasing)
-    epochs = 3  # Keep it small just for verifying loss drops
-    
-    mlflow.set_tracking_uri(os.path.join(base_dir, "mlruns"))
+    # 4. Training Loop — real run, not a smoke test. Early-stops on validation loss so we
+    # don't hand-pick an epoch count; nobody was checking val performance before (it built
+    # val_loader and never touched it).
+    max_epochs = 25
+    patience = 5
+
+    # SQLite backend, not file:// — the raw path used to crash on Windows path
+    # resolution (same issue documented for hyperparameter_tune.py, see
+    # docs/B3_model_training.md).
+    db_path = os.path.join(base_dir, "mlruns.db").replace("\\", "/")
+    mlflow.set_tracking_uri(f"sqlite:///{db_path}")
     mlflow.set_experiment("Spot-Interruption-Predictor")
-    
+
+    checkpoint_path = os.path.join(base_dir, "spot_transformer.pt")
+    scaler_path = os.path.join(base_dir, "spot_scaler.joblib")
+    metadata_path = os.path.join(base_dir, "model_metadata.json")
+
+    best_val_loss = float('inf')
+    epochs_without_improvement = 0
+
     with mlflow.start_run():
-        mlflow.log_param("epochs", epochs)
-        mlflow.log_param("batch_size", 64)
-        mlflow.log_param("learning_rate", 0.001)
+        mlflow.log_param("max_epochs", max_epochs)
+        mlflow.log_param("patience", patience)
+        mlflow.log_param("batch_size", batch_size)
+        mlflow.log_param("learning_rate", lr)
         mlflow.log_param("focal_alpha", 0.75)
         mlflow.log_param("focal_gamma", 2.0)
+        mlflow.log_param("d_model", d_model)
+        mlflow.log_param("nhead", nhead)
+        mlflow.log_param("num_layers", num_layers)
 
-        for epoch in range(epochs):
+        for epoch in range(max_epochs):
             model.train()
             running_loss = 0.0
-            
+
             for batch_idx, (x, y) in enumerate(train_loader):
                 x, y = x.to(device), y.to(device)
 
@@ -83,20 +110,61 @@ def train_model():
                 optimizer.step()
 
                 running_loss += loss.item()
-                
-                if batch_idx % 200 == 0:
-                    print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx}/{len(train_loader)} | Loss: {loss.item():.4f}")
 
-            avg_loss = running_loss / len(train_loader)
-            mlflow.log_metric("train_loss", avg_loss, step=epoch)
-            print(f"==> Epoch {epoch+1} Complete. Average Training Loss: {avg_loss:.4f}\n")
-        
-        # 5. Save Checkpoint inside MLflow
-        checkpoint_path = os.path.join(base_dir, "spot_transformer.pt")
-        torch.save(model.state_dict(), checkpoint_path)
-        
+                if batch_idx % 200 == 0:
+                    print(f"Epoch {epoch+1}/{max_epochs} | Batch {batch_idx}/{len(train_loader)} | Loss: {loss.item():.4f}")
+
+            avg_train_loss = running_loss / len(train_loader)
+            mlflow.log_metric("train_loss", avg_train_loss, step=epoch)
+
+            # Validation — this loader existed before but was never actually used.
+            model.eval()
+            val_running_loss = 0.0
+            val_probs, val_labels = [], []
+            with torch.no_grad():
+                for x, y in val_loader:
+                    x, y = x.to(device), y.to(device)
+                    raw_logits = model(x)
+                    val_running_loss += criterion(raw_logits, y).item()
+                    val_probs.extend(torch.sigmoid(raw_logits).cpu().numpy().flatten())
+                    val_labels.extend(y.cpu().numpy().flatten())
+
+            avg_val_loss = val_running_loss / len(val_loader)
+            val_pr_auc = average_precision_score(val_labels, val_probs)
+            mlflow.log_metric("val_loss", avg_val_loss, step=epoch)
+            mlflow.log_metric("val_pr_auc", val_pr_auc, step=epoch)
+
+            print(f"==> Epoch {epoch+1} Complete. Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val PR-AUC: {val_pr_auc:.4f}\n")
+
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                epochs_without_improvement = 0
+
+                # 5. Save the best checkpoint + the exact preprocessing needed to serve it.
+                torch.save(model.state_dict(), checkpoint_path)
+                joblib.dump(scaler, scaler_path)
+                with open(metadata_path, "w") as f:
+                    json.dump({
+                        "feature_columns": FEATURE_COLUMNS,
+                        "seq_length": SEQ_LENGTH,
+                        "num_features": input_features,
+                        "d_model": d_model,
+                        "nhead": nhead,
+                        "num_layers": num_layers,
+                        "best_epoch": epoch + 1,
+                        "val_loss": avg_val_loss,
+                        "val_pr_auc": val_pr_auc,
+                    }, f, indent=2)
+                print(f"    New best val_loss {avg_val_loss:.4f} — saved checkpoint, scaler, and metadata.")
+            else:
+                epochs_without_improvement += 1
+                if epochs_without_improvement >= patience:
+                    print(f"No val_loss improvement for {patience} epochs — stopping early at epoch {epoch+1}.")
+                    break
+
+        mlflow.log_metric("best_val_loss", best_val_loss)
         mlflow.pytorch.log_model(model, "model")
-        print(f"Model saved to {checkpoint_path} and logged to MLflow")
+        print(f"Best model saved to {checkpoint_path} (scaler: {scaler_path}, metadata: {metadata_path})")
 
 if __name__ == "__main__":
     train_model()
