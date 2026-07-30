@@ -103,15 +103,15 @@ resource "aws_eks_node_group" "spot_nodes" {
   node_role_arn   = aws_iam_role.eks_nodes.arn
   subnet_ids      = [for s in aws_subnet.public : s.id]
 
-  # On-Demand m7i-flex.large. ROOT CAUSE (2026-07-28, extends P-006): this AWS
-  # account is HARD-RESTRICTED to Free-Tier-eligible instance types — any other
-  # type fails with "InvalidParameterCombination: not eligible for Free Tier"
-  # and the node group hangs ~20 min then CREATE_FAILED. That killed every
-  # g4dn/m5/c5/t3.xlarge attempt (spot AND on-demand). m7i-flex.large is the
-  # largest Free-Tier-eligible x86 type here: 2 vCPU / 8 GB — enough for the CPU
-  # CIFAR-10 job + predict-service + operator. Only Free-Tier types will launch.
-  instance_types = ["m7i-flex.large"]
-  capacity_type  = "ON_DEMAND"
+  # Capacity + types are variable-driven (see variables.tf).
+  # DEFAULT = On-Demand m7i-flex.large: the Free-Tier-safe Week 6 config. This
+  # account was Free-Tier-restricted (P-013) — any non-free-tier type failed
+  # "not eligible for Free Tier". m7i-flex.large (2 vCPU / 8 GB) is the largest
+  # Free-Tier-eligible x86 type and runs the CPU CIFAR-10 job + services.
+  # TRACK 1 (real Spot reclaim, Paid-plan account): override to SPOT + ML types
+  # via -var (see variables.tf header).
+  instance_types = var.workload_instance_types
+  capacity_type  = var.workload_capacity_type
 
   scaling_config {
     desired_size = var.spot_desired_size # 0 by default; set to 2 for the Week 6 reschedule test
