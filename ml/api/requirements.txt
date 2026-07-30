@@ -5,3 +5,5 @@ torch==2.3.1+cpu
 --extra-index-url https://download.pytorch.org/whl/cpu
 pandas==2.2.2
 numpy==1.26.4
+scikit-learn==1.5.3
+joblib==1.5.3
