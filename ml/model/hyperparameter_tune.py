@@ -25,7 +25,7 @@ def tune_hyperparameters():
     print(f"Executing Hyperparameter Grid Search on {device}...")
 
     # Load data once
-    train_loader, val_loader, input_features = create_dataloaders(
+    train_loader, val_loader, input_features, _ = create_dataloaders(
         csv_path=features_csv,
         batch_size=64,
         train_split=0.8
