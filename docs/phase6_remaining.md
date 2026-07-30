@@ -1,18 +1,18 @@
 # Phase 6 — Remaining Work
 
-Phase 6's **systems milestone is done**: the full migration chain is validated live on real EKS with IRSA (see `problems_and_decisions.md` → *Week 6 — Live Validation*). What remains before this is an ML4Sys-credible result, in three tracks.
+Phase 6's **systems milestone is done**: the full migration chain is validated live on real EKS with IRSA (see `problems_and_decisions.md` → *Week 6 — Live Validation*). What remains before this is an ML4Sys-credible result, in three objectives.
 
-| Track | Owner | Gates |
+| Objective | Owner | Gates |
 |-------|-------|-------|
-| 2. Benchmark harness + baselines | Person B | build now; final arm-4 numbers wait on Track 3 |
+| 2. Benchmark harness + baselines | Person B | build now; final arm-4 numbers wait on Objective 3 |
 | 3. Prediction model validation | Person B + Angshuman | **the scientific crux** — flat 0.0419 score |
 | 1. Real Spot reclaim | Angshuman | needs a non-Free-Tier account |
 
-**Order:** build Track 2's harness + baselines now (no model needed) → fix Track 3 → generate final table → Track 1 for the "survived a real reclaim" claim.
+**Order:** build Objective 2's harness + baselines now (no model needed) → fix Objective 3 → generate final table → Objective 1 for the "survived a real reclaim" claim.
 
 ---
 
-## Track 2 — Benchmark (Person B, start now)
+## Objective 2 — Benchmark (Person B, start now)
 
 ### Objective
 Produce the **results table + figures** quantifying whether *predictive* migration beats simpler baselines under Spot interruptions: completion, wasted compute, makespan, cost, recovery time. This is the paper's core evidence table.
@@ -36,7 +36,7 @@ Produce the **results table + figures** quantifying whether *predictive* migrati
 
 ### Interruption injection
 - **Benchmark numbers use controlled injection**: a harness that kills the training pod on a **Poisson** schedule, mean rate matched to real Spot interruption frequency (pull real rates for the instance type from AWS Spot data). Run **many** interruptions across **many** repetitions — it's statistics, not one event.
-- **Real reclaim (AWS FIS) is Track 1**, a separate experiment. Do **not** couple the benchmark to real Spot — too slow/expensive for N trials, and the account is Free-Tier-restricted anyway.
+- **Real reclaim (AWS FIS) is Objective 1**, a separate experiment. Do **not** couple the benchmark to real Spot — too slow/expensive for N trials, and the account is Free-Tier-restricted anyway.
 
 ### Experimental design
 - Fix the training job + total work (CIFAR-10, fixed step budget).
@@ -62,11 +62,11 @@ benchmark/
 ```
 
 ### Dependency
-Arm 4's numbers are only meaningful once the model discriminates (Track 3). **Arms 1-3 + the harness need no model — build them now**; they establish the baselines to beat.
+Arm 4's numbers are only meaningful once the model discriminates (Objective 3). **Arms 1-3 + the harness need no model — build them now**; they establish the baselines to beat.
 
 ---
 
-## Track 3 — Prediction model validation (the scientific crux)
+## Objective 3 — Prediction model validation (the scientific crux)
 
 The predict-service returned a **flat 0.0419 risk for every instance type/AZ** during the live run. Until this is understood and fixed, the "predictive" claim does not hold. Steps in order:
 
@@ -79,7 +79,7 @@ The predict-service returned a **flat 0.0419 risk for every instance type/AZ** d
 
 ---
 
-## Track 1 — Survive a *real* Spot reclaim (Angshuman)
+## Objective 1 — Survive a *real* Spot reclaim (Angshuman)
 
 Currently the interruption is *simulated* via the operator's cordon+delete. To legitimately claim "survived a real reclaim":
 
