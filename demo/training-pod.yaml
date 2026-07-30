@@ -25,10 +25,33 @@ spec:
   nodeSelector:
     workload: ml-training           # schedule onto the m7i-flex workload nodes
   restartPolicy: Never
+  # Objective 1: on a REAL Spot reclaim the node drains and sends SIGTERM, then
+  # SIGKILL after this window. train.py's SIGTERM handler flushes a checkpoint
+  # to S3 — this must finish inside the 2-min Spot notice. 90s is ample.
+  # (The Week 6 *simulated* path uses grace_period_seconds=0 = SIGKILL and does
+  #  not rely on this; the real-reclaim path does.)
+  terminationGracePeriodSeconds: 90
+  volumes:
+    - name: dataset          # shared between the init fetch and the trainer
+      emptyDir: {}
+  # Pre-seed CIFAR-10 from S3 (in-region, seconds) so train.py skips the slow
+  # ~35-min toronto.edu download. One-time upload of the tar:
+  #   aws s3 cp cifar-10-python.tar.gz s3://argus-checkpoints-844641713781/datasets/
+  # Uses the pod's IRSA (argus-operator-irsa has s3:GetObject on the bucket).
+  initContainers:
+    - name: fetch-dataset
+      image: public.ecr.aws/aws-cli/aws-cli:latest
+      command: ["sh", "-c", "aws s3 cp s3://argus-checkpoints-844641713781/datasets/cifar-10-python.tar.gz /app/data/cifar-10-python.tar.gz"]
+      volumeMounts:
+        - name: dataset
+          mountPath: /app/data
   containers:
     - name: train
       image: 844641713781.dkr.ecr.eu-north-1.amazonaws.com/argus/training-job:latest
       imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - name: dataset      # torchvision finds the tar here, extracts, skips download
+          mountPath: /app/data
       # AWS_ENDPOINT_URL intentionally left UNSET so boto3 hits real AWS.
       env:
         - name: EPOCHS          # override baked-in 5 → long run so we can
