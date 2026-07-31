@@ -23,12 +23,17 @@ v=$(aws elbv2 describe-load-balancers --region "$HOME_REGION" --query 'LoadBalan
 v=$(aws ec2 describe-addresses --region "$HOME_REGION" --query 'Addresses[?AssociationId==null].PublicIp' --output text 2>/dev/null);         [ -n "$v" ] && hit "unattached Elastic IPs: $v"
 v=$(aws ec2 describe-volumes --region "$HOME_REGION" --filters Name=status,Values=available --query 'Volumes[].VolumeId' --output text 2>/dev/null); [ -n "$v" ] && hit "orphaned EBS volumes: $v"
 
-echo "== all-region sweep: stray EC2 / EKS anywhere =="
+echo "== all-region sweep: hourly billers anywhere (EC2 / EKS / NAT / load balancers) =="
+echo "   (checks every enabled region — takes ~1-3 min)"
 for reg in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text 2>/dev/null); do
   ec2=$(aws ec2 describe-instances --region "$reg" --filters Name=instance-state-name,Values=running,pending --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null)
   eks=$(aws eks list-clusters --region "$reg" --query 'clusters' --output text 2>/dev/null)
-  { [ -n "$ec2" ] || [ -n "$eks" ]; } && hit "$reg: EC2=[$ec2] EKS=[$eks]"
+  nat=$(aws ec2 describe-nat-gateways --region "$reg" --filter Name=state,Values=available,pending --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null)
+  lb=$(aws elbv2 describe-load-balancers --region "$reg" --query 'LoadBalancers[].LoadBalancerName' --output text 2>/dev/null)
+  if [ -n "${ec2}${eks}${nat}${lb}" ]; then hit "$reg: EC2=[$ec2] EKS=[$eks] NAT=[$nat] LB=[$lb]"; fi
 done
+# Note: unattached Elastic IPs + orphaned EBS volumes are checked in $HOME_REGION only
+# (they're cents/hr and local to where you actually work). Add to the sweep if paranoid.
 
 echo "------------------------------------------------------"
 if [ "$found" -eq 0 ]; then
