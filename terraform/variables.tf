@@ -38,3 +38,21 @@ variable "spot_desired_size" {
   type        = number
   default     = 0
 }
+
+# Workload node capacity + types. Defaults are the Week 6 Free-Tier-safe config
+# (On-Demand m7i-flex.large). For Track 1 (real Spot reclaim) on a Paid-plan
+# account, override:
+#   terraform apply -var 'workload_capacity_type=SPOT' \
+#     -var 'workload_instance_types=["m5.large","c5.xlarge","m5.xlarge"]' \
+#     -var spot_desired_size=2
+variable "workload_capacity_type" {
+  description = "ON_DEMAND (Free-Tier-safe default) or SPOT (Track 1, Paid plan only)"
+  type        = string
+  default     = "ON_DEMAND"
+}
+
+variable "workload_instance_types" {
+  description = "Workload node instance types. m7i-flex.large is the Free-Tier default; use ML/Spot types for Track 1"
+  type        = list(string)
+  default     = ["m7i-flex.large"]
+}

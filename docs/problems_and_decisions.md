@@ -212,3 +212,71 @@ Resume-from-checkpoint validated: real `latest_checkpoint.pt` written to S3 by t
 **Cost note:** EKS torn down to $0 after the run (`terraform destroy` of node groups + control plane; S3/SQS/Lambda/IAM retained).
 
 **Open for the paper (NeurIPS ML4Sys 2026 poster):** the model returned a flat `0.0419` for every instance type/AZ — prediction discrimination is unproven and must be validated (AUC / lead-time / vs a reactive baseline) before the "predictive" claim holds. The systems layer is validated; the ML claim is not yet.
+
+---
+
+## Objective 1 — Real Spot Reclaim (in progress, 2026-07-29/30)
+
+Goal: earn the "survived a real Spot reclaim" claim (vs the Week 6 *simulated* cordon). See `phase6_remaining.md` Objective 1 and `scripts/objective1_real_spot.sh`.
+
+**ADR-006 — Account upgraded Free → Paid plan to unlock Spot.** The Free account plan (P-013) blocks all non-free-tier types. Upgraded to Paid (Billing console). Verified with a zero-cost `aws ec2 run-instances --dry-run --instance-type m5.large` → `DryRunOperation: would have succeeded`. Real Spot then launched: 2× `c5.xlarge` Spot nodes up in 2m45s (the exact type that failed all of Week 6). **Tradeoff:** the Free-Tier guardrail is gone — real charges are now possible, so `scripts/verify_teardown.sh` after every session + the $20 budget alarm matter more.
+
+**Objective 1 stack that worked:** real Spot node group (SPOT + m5.large/c5.xlarge/m5.xlarge via `-var`), operator + predict-service deployed, **AWS Node Termination Handler** installed (IMDS mode, drains node on the Spot notice), `terminationGracePeriodSeconds: 90` on the training pod so the SIGTERM checkpoint completes inside the 2-min notice.
+
+### P-019 — FIS blocked: `SubscriptionRequiredException` right after the Paid-plan upgrade
+**Week:** Objective 1  
+**Problem:** `aws fis create-experiment-template` (and `list-experiment-templates`) failed with `SubscriptionRequiredException: The AWS Access Key Id needs a subscription for the service`. FIS is the *only* way to trigger a real Spot interruption on demand (no public EC2 API for it). EC2/Spot worked, but FIS was not yet active — the Free→Paid upgrade propagated to EC2 first, FIS lagging.  
+**Fix (pending):** no workaround — wait for FIS to activate. Because the check needs no running resources, tear EKS down to `$0` and poll for free: `./scripts/objective1_real_spot.sh check-fis` (or `aws fis list-experiment-templates --region eu-north-1`). Re-run the Objective 1 sequence once it reports ACTIVE. The `argus-fis-spot` IAM role persists.  
+**Lesson:** After a plan/subscription change, secondary services (FIS) activate later than core ones (EC2). Preflight FIS **before** spinning up billable infra — `objective1_real_spot.sh fis-setup` now checks this and fails fast. Also: never swallow an AWS CLI error behind an assumed "already exists" — the original script hid this behind a bogus message.
+**Update (2026-07-30):** still blocked after 24h+. Root cause is deeper than propagation: the Billing console shows the account is **still on the Free account plan** (`portal.aws.amazon.com/billing/signup/incomplete`) even though a payment method is added and paid EC2/Spot launches. "Upgrade plan" / resubscribe just redirects to the console without completing. So FIS (gated behind the Paid plan) stays off. This needs AWS Support to force-complete the plan upgrade — it can't be clicked through. **FIS deferred; interruption validated via injection instead (ADR-007).**
+
+---
+
+### ADR-007 — Interruption validated by event injection into NTH (queue mode), FIS deferred
+**Decision:** Since FIS is blocked (P-019), validate the reactive interruption path by running **AWS Node Termination Handler in Queue Processor mode** and **injecting a schema-correct `EC2 Spot Instance Interruption Warning`** into its SQS queue, instead of an AWS-issued reclaim.
+**Why:** NTH cannot distinguish an injected event from an EventBridge-delivered one — it runs the identical drain→SIGTERM→checkpoint→reschedule→resume path. This validates the *handler* faithfully, on real Spot nodes, without depending on FIS. The EventBridge rule is also wired so genuine reclaims flow in.
+**Impact:** Honest paper framing — claim "handler validated via schema-conformant injected events + real Spot operation," NOT "AWS reclaimed the instance." FIS (true on-demand reclaim) remains the future deterministic-trigger step, pending the account-plan fix. See `scripts/objective1_real_spot.sh` (`nth-queue`, `inject`).
+
+---
+
+### P-020 — NTH `NoCredentialProviders`: pods can't use the node role (IMDS hop limit)
+**Week:** Objective 1
+**Problem:** NTH queue-mode crash-looped: `Unable to get AWS credentials — NoCredentialProviders: no valid providers in chain`. It was relying on the node instance role, but EKS managed nodes cap the IMDS `httpPutResponseHopLimit`, so pods can't reach `169.254.169.254` for the node role.
+**Fix:** Give NTH **IRSA** — a role `argus-nth-irsa` trust-scoped to `kube-system:aws-node-termination-handler` (SQS receive/delete + ec2/asg describe), annotate the SA, and **restart the pod** (the pod-identity webhook injects the token only at creation). Baked into `objective1_real_spot.sh nth-queue`.
+**Lesson:** On EKS, give controller pods AWS access via IRSA, not the node role. And annotating a ServiceAccount does nothing until its pods are **recreated**.
+
+---
+
+### P-021 — NTH silently ignored the interruption (`checkTagBeforeDraining`)
+**Week:** Objective 1
+**Problem:** After creds were fixed, NTH **consumed** the injected SQS message (queue drained to 0) but took **no action** — no cordon, no drain, no log. Default `checkTagBeforeDraining: true` makes NTH only drain instances tagged `aws-node-termination-handler/managed`; the EKS nodes aren't tagged, so it skipped silently.
+**Fix:** `--set checkTagBeforeDraining=false` (and the deprecated `checkASGTagBeforeDraining=false`) + restart. Baked into the script.
+**Lesson:** "Message consumed, nothing happened" on NTH = the managed-tag gate. Disable it or tag the nodes.
+
+---
+
+### P-022 — CIFAR-10 re-download (~35 min/pod) killed iteration → cached in S3 + initContainer
+**Week:** Objective 1
+**Problem:** Every training pod re-downloaded CIFAR-10 (~170 MB) from `cs.toronto.edu` at ~3 MB/min (15-35 min), wasting the billed window and, on the first Objective 1 attempt, letting training *complete* before the inject could land.
+**Fix:** Uploaded the verified tar once (offline, `$0`) to `s3://argus-checkpoints-.../datasets/cifar-10-python.tar.gz`, and added an **initContainer** (`public.ecr.aws/aws-cli`) to `training-pod.yaml` that pulls it into a shared `emptyDir` at `/app/data` (185 MiB/s in-region) — `train.py` finds the tar, skips the download. Training now starts in seconds.
+**Lesson:** Never let a pod download a fixed dataset from a slow external host on a billed cluster. Cache it in-region (S3) once; pull via an initContainer. (Same fix Person B needs for the Objective 2 benchmark's N runs.)
+
+---
+
+## Objective 1 — CAPTURED on Real Spot (2026-07-30)
+
+Reactive Spot-interruption survival validated end-to-end on **real Spot nodes** (`c5.xlarge`/`m5.xlarge`), via schema-conformant event injection into NTH (ADR-007). Training was live at **epoch 7** when the interruption fired:
+
+| t (UTC) | Event | Evidence |
+|---------|-------|----------|
+| 12:26:18 | NTH receives `EC2 Spot Instance Interruption Warning` (SQS_MONITOR, Kind=SPOT_ITN, IsManaged) | NTH log |
+| 12:26:19 | Requesting drain → **evicting pod `cifar10-test`** (graceful, SIGTERM) | NTH log |
+| 12:26:19 | SIGTERM handler **writes checkpoint (epoch 8) to S3** | `latest_checkpoint.pt` updated |
+| 12:26:25 | **Node cordoned + drained** — 10 s end-to-end | node `unschedulable=true` + taint |
+| +~75 s | Replacement pod on **healthy node `ip-10-0-1-118`** (cordoned node avoided) → **`Resuming from epoch 8`** | pod log |
+
+**Result:** interrupted at epoch 7-8, resumed at epoch 8 on a different node — only the in-progress epoch's work lost. Full production path (warning → drain → SIGTERM checkpoint → reschedule → resume) exercised. Torn down to `$0` after; dataset + `argus-fis-spot`/`argus-nth-irsa` roles persist for reruns.
+
+**vs Week 6:** Week 6 used the operator's cordon with `grace_period_seconds=0` (SIGKILL, no SIGTERM checkpoint). Objective 1 exercises the *real* NTH drain with a graceful SIGTERM checkpoint — a materially stronger claim.
+
+**Still open:** FIS-issued reclaim (a genuine AWS termination via IMDS) pending the account-plan fix (P-019). Injection stands on its own; FIS would add "AWS actually pulled the instance."
