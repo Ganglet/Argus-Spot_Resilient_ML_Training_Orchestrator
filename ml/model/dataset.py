@@ -93,27 +93,34 @@ class SpotPriceDataset(Dataset):
         y = torch.tensor(self.labels[idx]).unsqueeze(0) # [1] shaped
         return x, y
 
+def temporal_split_indices(group_ranges, train_split: float = 0.8, purge: int = SEQ_LENGTH + PREDICTION_HORIZON):
+    """
+    Split EACH group by time (earlier windows -> train, later -> val), not randomly
+    across the whole flat sequence list. Consecutive windows overlap by seq_length-1
+    of their seq_length timesteps (stride-1 sliding window), so a random split puts
+    near-duplicate windows on both sides of the train/val boundary - the model could
+    partly memorize val examples via their train-side near-twins. A purge gap on
+    either side of the cut removes every window whose timesteps overlap across the
+    boundary, so val is honestly held-out future data. Shared by the Transformer
+    dataloaders and any other model (e.g. the XGBoost baseline) trained on the same
+    windows, so every model is compared on the exact same split.
+    """
+    train_indices = []
+    val_indices = []
+    for start, end in group_ranges:
+        n = end - start
+        cut = start + int(n * train_split)
+        train_indices.extend(range(start, min(cut, end)))
+        val_indices.extend(range(min(cut + purge, end), end))
+    return train_indices, val_indices
+
 def create_dataloaders(csv_path: str, batch_size: int = 64, train_split: float = 0.8):
     """
     Creates PyTorch DataLoaders to continuously stream our CSV into the Transformer.
     """
     dataset = SpotPriceDataset(csv_file_path=csv_path, seq_length=SEQ_LENGTH)
 
-    # Split EACH group by time (earlier windows -> train, later -> val), not randomly
-    # across the whole flat sequence list. Consecutive windows overlap by seq_length-1
-    # of their seq_length timesteps (stride-1 sliding window), so a random split put
-    # near-duplicate windows on both sides of the train/val boundary - the model could
-    # partly memorize val examples via their train-side near-twins. A purge gap of
-    # seq_length + prediction_horizon on either side of the cut removes every window
-    # whose timesteps overlap across the boundary, so val is honestly held-out future data.
-    purge = SEQ_LENGTH + PREDICTION_HORIZON
-    train_indices = []
-    val_indices = []
-    for start, end in dataset.group_ranges:
-        n = end - start
-        cut = start + int(n * train_split)
-        train_indices.extend(range(start, min(cut, end)))
-        val_indices.extend(range(min(cut + purge, end), end))
+    train_indices, val_indices = temporal_split_indices(dataset.group_ranges, train_split)
 
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
