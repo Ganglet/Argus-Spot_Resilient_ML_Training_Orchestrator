@@ -47,6 +47,10 @@ class SpotPriceDataset(Dataset):
 
         self.sequences = []
         self.labels = []
+        # (start, end) index range in self.sequences for each instance/AZ group, in time
+        # order. create_dataloaders uses these to split train/val WITHIN each group by
+        # time, instead of randomly across all groups.
+        self.group_ranges = []
 
         # We must group by instance/az so sequences don't overlap between wildly different servers
         print("Extracting sliding windows...")
@@ -55,25 +59,28 @@ class SpotPriceDataset(Dataset):
 
             features_array = self.scaler.transform(group[feature_cols].fillna(0).values)
             labels_array = group["is_spike"].values
-            
+
             num_rows = len(group)
-            
+            group_start = len(self.sequences)
+
             # Slide a window across the time series
             for i in range(num_rows - self.seq_length - self.prediction_horizon):
                 # The historical window (X)
                 window_x = features_array[i : i + self.seq_length]
-                
+
                 # Did an interruption/spike occur in the specific future horizon? (Y)
                 # If ANY of the future timesteps are 1 (interrupted), label is 1
                 future_y = labels_array[i + self.seq_length : i + self.seq_length + self.prediction_horizon]
                 interruption_occurred = 1 if future_y.sum() > 0 else 0
-                
+
                 self.sequences.append(window_x)
                 self.labels.append(interruption_occurred)
-        
+
+            self.group_ranges.append((group_start, len(self.sequences)))
+
         self.sequences = np.array(self.sequences, dtype=np.float32)
         self.labels = np.array(self.labels, dtype=np.float32)
-        
+
         print(f"Dataset compiled. Total sequences: {len(self.sequences)}")
         print(f"Total interruptions (1s): {self.labels.sum()} | Normal (0s): {len(self.labels) - self.labels.sum()}")
 
@@ -92,11 +99,24 @@ def create_dataloaders(csv_path: str, batch_size: int = 64, train_split: float =
     """
     dataset = SpotPriceDataset(csv_file_path=csv_path, seq_length=SEQ_LENGTH)
 
-    # Train / Val Split (no random shuffling prior to split for time-series)
-    train_size = int(len(dataset) * train_split)
-    val_size = len(dataset) - train_size
+    # Split EACH group by time (earlier windows -> train, later -> val), not randomly
+    # across the whole flat sequence list. Consecutive windows overlap by seq_length-1
+    # of their seq_length timesteps (stride-1 sliding window), so a random split put
+    # near-duplicate windows on both sides of the train/val boundary - the model could
+    # partly memorize val examples via their train-side near-twins. A purge gap of
+    # seq_length + prediction_horizon on either side of the cut removes every window
+    # whose timesteps overlap across the boundary, so val is honestly held-out future data.
+    purge = SEQ_LENGTH + PREDICTION_HORIZON
+    train_indices = []
+    val_indices = []
+    for start, end in dataset.group_ranges:
+        n = end - start
+        cut = start + int(n * train_split)
+        train_indices.extend(range(start, min(cut, end)))
+        val_indices.extend(range(min(cut + purge, end), end))
 
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(dataset, val_indices)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
