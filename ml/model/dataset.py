@@ -114,6 +114,28 @@ def temporal_split_indices(group_ranges, train_split: float = 0.8, purge: int = 
         val_indices.extend(range(min(cut + purge, end), end))
     return train_indices, val_indices
 
+def val_calibration_test_split(group_ranges, train_split: float = 0.8, purge: int = SEQ_LENGTH + PREDICTION_HORIZON):
+    """
+    Recreates train.py's exact 80/20 split (same formula, same purge), then further
+    splits the 20% val portion in half (chronologically, with its own purge gap) into
+    a calibration-fit set and a final held-out test set. The calibration-fit half is
+    what train.py already uses for early stopping/model selection - fitting a
+    calibrator on it doesn't touch any new data. The test half is never used for
+    model selection or calibration, only for final reported numbers, so those numbers
+    aren't circular.
+    """
+    calib_indices = []
+    test_indices = []
+    for start, end in group_ranges:
+        n = end - start
+        train_cut = start + int(n * train_split)
+        val_start = min(train_cut + purge, end)
+        val_n = end - val_start
+        calib_cut = val_start + val_n // 2
+        calib_indices.extend(range(val_start, min(calib_cut, end)))
+        test_indices.extend(range(min(calib_cut + purge, end), end))
+    return calib_indices, test_indices
+
 def create_dataloaders(csv_path: str, batch_size: int = 64, train_split: float = 0.8):
     """
     Creates PyTorch DataLoaders to continuously stream our CSV into the Transformer.

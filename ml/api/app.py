@@ -26,6 +26,7 @@ FEATURES_CSV = os.getenv("FEATURES_CSV", "/app/data/features.csv")
 # Global state
 model = None
 scaler = None
+calibrator = None  # optional: Platt-scaling calibrator, applied to the raw sigmoid output
 feature_cache = None
 is_ready = False
 
@@ -33,12 +34,13 @@ num_features = len(FEATURE_COLUMNS)
 seq_len = SEQ_LENGTH
 
 def _load_model():
-    global model, scaler, is_ready
+    global model, scaler, calibrator, is_ready
     try:
         model_dir = os.path.join(os.path.dirname(__file__), "../model")
         model_path = os.path.join(model_dir, "spot_transformer.pt")
         scaler_path = os.path.join(model_dir, "spot_scaler.joblib")
         metadata_path = os.path.join(model_dir, "model_metadata.json")
+        calibrator_path = os.path.join(model_dir, "spot_calibrator.joblib")
 
         if not os.path.exists(model_path):
             # In a real environment, you'd download the model from S3 on startup
@@ -71,6 +73,17 @@ def _load_model():
         )
         model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
         model.eval()
+
+        # Optional: raw model output is over-confident (see calibrate_and_finalize.py -
+        # uncalibrated Brier score is worse than a trivial "always predict safe"
+        # baseline). If a calibrator was fit, apply it; if not, fall back to the raw
+        # sigmoid rather than failing startup over an optional artifact.
+        if os.path.exists(calibrator_path):
+            calibrator = joblib.load(calibrator_path)
+            print("Calibrator loaded — risk_score will be Platt-scaled.")
+        else:
+            calibrator = None
+            print("No calibrator found — risk_score will be the raw (uncalibrated) sigmoid output.")
 
         is_ready = True
         print("Model, scaler, and metadata loaded successfully.")
@@ -152,8 +165,16 @@ def _predict(instance_type: str, az: str):
     
     with torch.no_grad():
         logits = model(x_tensor)
-        risk_score = torch.sigmoid(logits).item()
-        
+        raw_prob = torch.sigmoid(logits).item()
+
+    if calibrator is not None:
+        eps = 1e-7
+        clipped = min(max(raw_prob, eps), 1 - eps)
+        logit = np.log(clipped / (1 - clipped))
+        risk_score = float(calibrator.predict_proba([[logit]])[0, 1])
+    else:
+        risk_score = raw_prob
+
     return {
         "instance_type": instance_type,
         "az": az,
