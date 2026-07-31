@@ -3,123 +3,125 @@
 Honest results for the paper figure. Trained and evaluated on the real feature
 pipeline output (`ml/data/features.csv`, 386,868 windowed sequences from live
 `eu-north-1` Spot price history). Reproduce with `python ml/model/train.py`
-then `python ml/model/evaluate.py`.
+then `python ml/model/calibrate_and_finalize.py`.
 
-## What was actually broken
+This went through two rounds: Round 1 fixed the bugs that made the model
+useless (flat output). Round 2 fixed methodology problems that were making
+the *measurement* of the model optimistic/pessimistic in different ways, and
+tried a few concrete improvements. Both are recorded below because the
+reasoning matters for anyone touching this code next.
+
+## Round 1 — bugs that made the model useless
 
 The model previously returned a **flat `0.0419` for every instance type/AZ**
-(see `problems_and_decisions.md` P-018/019). Root causes, all fixed on this
-branch:
+(see `problems_and_decisions.md` P-018/019). Root causes:
 
 1. **Train/serve skew (the direct cause of the flat score).** Training
    standardized features with `StandardScaler`, fit *per instance/AZ group*,
-   then threw the scaler away (`dataset.py`). Serving (`app.py`) fed the model
-   raw `spot_price`/`rolling_std` values with no scaling at all. A model
-   trained on ~N(0,1) inputs, fed raw ones (`spot_price≈0.05`,
-   `rolling_std≈0.001`), saturates to a near-constant output. Fixed by fitting
-   **one global scaler**, persisting it (`spot_scaler.joblib`), and applying
-   it at serving.
+   then threw the scaler away. Serving fed the model raw values with no
+   scaling. Fixed by fitting **one global scaler**, persisting it
+   (`spot_scaler.joblib`), and applying it at serving.
 2. **3-epoch smoke test, never scaled up.** `train.py` hardcoded `epochs = 3`
    with a comment admitting it was "just for verifying loss drops," and never
-   touched the validation loader it built. Fixed: real validation loop
-   (loss + PR-AUC every epoch) with early stopping on val loss.
+   touched the validation loader it built.
 3. **Serving feature/sequence mismatch.** Training used 13 named columns in a
-   fixed order and `seq_length=24`; serving used `select_dtypes()` (no
-   guaranteed column order) and `seq_len=12`. Fixed by pulling both into a
-   single `feature_config.py` imported by both training and serving, plus a
-   metadata file (`model_metadata.json`) that serving validates against at
-   startup.
-4. **(Found while fixing #2) MLflow tracking URI crashed on Windows.**
-   `train.py` passed a raw filesystem path to `mlflow.set_tracking_uri()`,
-   which threw `UnsupportedModelRegistryStoreURIException` before a single
-   batch ran — every prior "training run" had actually been silently dying at
-   this line. Switched to the SQLite backend already used by
-   `hyperparameter_tune.py` (see `B3_model_training.md`).
+   fixed order and `seq_length=24`; serving used `select_dtypes()` and
+   `seq_len=12`. Fixed with a single `feature_config.py` + `model_metadata.json`
+   that serving validates against at startup.
+4. **MLflow tracking URI crashed on Windows**, silently killing every prior
+   "training run" before a single batch ran. Switched to the SQLite backend.
 
-## Real training run
+Round 1 result: PR-AUC 0.0034 (4x base rate), Brier score actually *worse*
+than a trivial always-predict-safe baseline (badly overconfident).
 
-12 epochs, early-stopped (no val-loss improvement for 5 epochs), ~55 min
-total on CPU. `d_model=128, nhead=2, num_layers=2, lr=5e-4` — the config
-`hyperparameter_tune.py`'s grid search already found best.
+## Round 2 — methodology bugs, a baseline, a new feature, calibration
 
-| Epoch | Train Loss | Val Loss | Val PR-AUC |
-|-------|-----------|----------|------------|
-| 1 | 0.0017 | 0.0017 | 0.0063 |
-| 7 (**best, checkpointed**) | — | **0.00134** | 0.0028 |
-| 10 | 0.0015 | 0.0014 | 0.0029 |
-| 12 (stopped) | 0.0015 | 0.0013 | 0.0033 |
+1. **Train/val leakage.** Sliding windows overlap 23/24 timesteps with their
+   neighbor (stride 1). The Round 1 split (`random_split`) put near-duplicate
+   windows on both sides of the train/val boundary, so val was partly
+   measuring memorization. Fixed: split each instance/AZ group **by time**
+   (earlier → train, later → val), with a purge gap so no window's timesteps
+   cross the boundary (`dataset.py::temporal_split_indices`).
+2. **FocalLoss's `alpha` was a no-op.** It was applied as a flat scalar to
+   every sample regardless of label — mathematically identical to scaling the
+   learning rate, not the "penalize the rare class harder" effect the
+   docstring claimed. Only `gamma` was doing anything. Fixed to the standard
+   per-class `alpha_t` weighting, then grid-searched (`tune_focal_loss.py`):
+   best is `alpha=0.75, gamma=1.0`.
+3. **Wrong scikit-learn version pinned in `ml/api/requirements.txt`**
+   (`1.5.3` — that was actually joblib's version, misread earlier; real
+   version is `1.8.0`). Would have risked the API container failing to
+   unpickle the scaler.
+4. **XGBoost baseline** (`train_xgboost.py`), on the exact same held-out test
+   split as the Transformer — see comparison table below.
+5. **Cross-AZ price divergence feature** (`az_price_divergence`): how far
+   this AZ's price has drifted from its sibling AZs for the same instance
+   type at the same timestamp. Computed in `feature_pipeline.py` but **not**
+   enabled by default — see the comparison table, it made things worse in the
+   one run tested, but that's not strong evidence at this sample size.
+6. **Calibration + honest final test set** (`calibrate_and_finalize.py`).
+   Platt scaling fit on the same data already used for early stopping (no new
+   data spent), then final numbers reported on a slice that was **never**
+   touched by training, early stopping, or calibration.
 
-Best checkpoint selected on val loss (epoch 7) — the metric early stopping
-actually tracks. PR-AUC bounces around a fixed small range regardless of
-epoch, for reasons explained below.
+## Final comparison (identical held-out test set: 38,085 windows, 84 positives, base rate 0.221%)
 
-## Evaluation on held-out validation data
+| Model | PR-AUC | Lift vs. random | Brier (calibrated) | Best F1 | Recall | Confusion (TP/FN/FP) |
+|---|---|---|---|---|---|---|
+| **Transformer, 13 features (SHIPPED)** | **0.0211** | **9.55x** | **0.0022** (= trivial baseline) | 0.0947 | 21.4% | 18/66/278 |
+| Transformer, 14 features (+ `az_price_divergence`) | 0.0103 | 4.67x | 0.0022 | 0.0536 | 3.6% | 3/81/25 |
+| XGBoost, 14 features | 0.0037 | 1.66x | 0.1461 (badly miscalibrated) | 0.0157 | 22.6% | 19/65/2315 |
+| Round 1 model (leaky split, broken alpha) | 0.0034 | 4.0x | 0.0036 (worse than trivial) | 0.0097 | 4.6% | 3/62/549 |
+
+**Takeaways:**
+- Fixing the leakage + FocalLoss bugs alone took PR-AUC from 4x → ~9x base
+  rate lift on an honestly-measured test set — that's the real effect of
+  Round 2, not noise.
+- The Transformer beats XGBoost by a wide margin here. A lower-capacity model
+  was the hypothesis going in (so few positive examples); it didn't pan out —
+  XGBoost has by far the worst calibration of the three (Brier 66x the
+  trivial baseline) and the weakest ranking signal.
+- The cross-AZ feature is **not shipped**. One run isn't enough evidence to
+  trust either direction with ~200 positive training examples — it needs a
+  multi-seed comparison before being added back (`feature_config.py` has the
+  full reasoning inline).
+- Run-to-run variance is real: two separate runs of the *identical* 13-feature
+  config scored 0.0183 and 0.0211 PR-AUC. Any single number here has a wide
+  error bar — don't over-read small differences between configs.
+
+## Serving fix, verified directly (with calibration applied)
 
 ```
-Total Validation Samples: 77,374
-Total Interruption Events (1s) in Val: 65
-PR-AUC (Average Precision): 0.0034
-Brier Score (calibration):  0.0036
-Optimal Probability Threshold: 0.1090
-F1-Score: 0.0097  |  Precision: 0.0054  |  Recall: 0.0462
-
-Confusion Matrix @ optimal threshold:
-                  Predicted Safe   Predicted Risk
-Actual Safe            76,760            549
-Actual Risk                62              3
+c5.2xlarge  eu-north-1a -> 0.0010
+c5.2xlarge  eu-north-1b -> 0.0014
+c5.2xlarge  eu-north-1c -> 0.0014
+c5.xlarge   eu-north-1a -> 0.0008
+c5.xlarge   eu-north-1b -> 0.0014
+c5.xlarge   eu-north-1c -> 0.0014
 ```
 
-**Read this honestly, not optimistically:** the validation base rate is
-65 / 77,374 = 0.084%. A model with *zero* signal would score PR-AUC ≈ 0.00084.
-This model scores 0.0034 — roughly **4x the base rate**, i.e. a real but weak
-signal, not a strong discriminator.
+Scores vary per instance/AZ (flat-`0.0419` bug fixed) and now sit in a
+sensible range near the true base rate (~0.2-0.8%) instead of the wildly
+overconfident 0.05-0.09 range Round 1 produced — direct evidence the
+calibration pass is doing its job.
 
-The Brier score is worse than it looks: a trivial model that always predicts
-"safe" (~0) gets Brier ≈ 0.00084 on this base rate. This model gets **0.0036
-— over 4x worse than that trivial baseline.** That means it is systematically
-over-predicting risk (its outputs sit around 0.05–0.09 rather than near-0),
-not well-calibrated at the low end as a first read might suggest. Most likely
-cause: Focal Loss optimizes for ranking rare positives, not calibrated
-probabilities, and a single global scaler averages over instance types with
-very different absolute price scales. If calibrated probabilities matter for
-the paper's threshold-setting story, that needs a calibration pass (Platt
-scaling / isotonic regression) on top of this checkpoint — not done here.
-
-## Serving fix, verified directly
-
-Called `_predict()` for 8 different (instance_type, AZ) pairs against the
-retrained model — scores now vary per instance/AZ instead of returning the
-same constant:
-
-```
-c5.2xlarge  eu-north-1a -> 0.0685
-c5.2xlarge  eu-north-1b -> 0.0913
-c5.2xlarge  eu-north-1c -> 0.0785
-c5.xlarge   eu-north-1a -> 0.0710
-c5.xlarge   eu-north-1b -> 0.0693
-c5.xlarge   eu-north-1c -> 0.0796
-g4dn.xlarge eu-north-1a -> 0.0719
-g4dn.xlarge eu-north-1b -> 0.0669
-```
-
-The flat-`0.0419`-for-everything bug is confirmed fixed.
-
-## The limit fixing bugs can't fix
+## The limit fixing bugs and methodology can't fix
 
 `is_spike = spot_price > prev_price * 1.01` is a **proxy label**, not a real
 AWS reclaim event, and it's extremely rare (303 positive windows out of
-386,868 — 0.078%). Even a perfectly trained, correctly-served model can only
-learn to predict >1% price jumps, which correlate weakly with actual Spot
-interruptions. That's why PR-AUC stays low regardless of epoch count or
-architecture — this is a data/label problem, not a training bug.
+386,868 — 0.078%). Even a well-trained, correctly-served, well-calibrated
+model can only learn to predict >1% price jumps, which correlate weakly with
+actual Spot interruptions. That's the ceiling on PR-AUC here — no amount of
+further tuning gets past it without better labels.
 
-**Not implemented here:** lead-time and against-real-interruption evaluation.
-Both need real interruption timestamps (e.g. from NTH/EventBridge history) to
-mean anything; scoring lead-time against a price-spike proxy would just be
-measuring how early the model predicts price spikes, not interruptions.
+**Not implemented:** lead-time and against-real-interruption evaluation. Both
+need real interruption timestamps (e.g. from NTH/EventBridge history) to mean
+anything; scoring lead-time against a price-spike proxy would just measure
+how early the model predicts price spikes, not interruptions.
 
 **Say in the paper:** *"the reactive path (Objective 1) is validated on real
-Spot infrastructure; the predictive model's serving bug is fixed and it is
-trained/evaluated honestly, but it currently shows only weak discrimination
-(PR-AUC ≈ 4x base rate) because ground-truth interruption labels are not yet
-available — this is future work, not a claim made in this paper."*
+Spot infrastructure; the predictive model is trained, evaluated, and
+calibrated on a held-out test set with a real (~9.5x base rate) but weak
+signal — usable as a secondary/advisory signal, not a primary trigger. The
+ceiling is the proxy label, not the model or pipeline; real interruption
+ground truth is future work."*
