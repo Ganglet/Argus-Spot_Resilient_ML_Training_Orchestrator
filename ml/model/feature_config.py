@@ -10,6 +10,7 @@ FEATURE_COLUMNS = [
     "normalized_ratio",
     "sin_time_day", "cos_time_day",
     "sin_day_week", "cos_day_week",
+    "az_price_divergence",
 ]
 
 SEQ_LENGTH = 24  # 24 timesteps * 5 min = 2 hours of history
