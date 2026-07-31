@@ -10,6 +10,7 @@ FEATURE_COLUMNS = [
     "normalized_ratio",
     "sin_time_day", "cos_time_day",
     "sin_day_week", "cos_day_week",
+    "instance_interruption_rate",
 ]
 # "az_price_divergence" is computed by feature_pipeline.py but deliberately left out
 # here: a single training run with it included scored WORSE on the held-out test set
