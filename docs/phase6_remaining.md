@@ -66,16 +66,38 @@ Arm 4's numbers are only meaningful once the model discriminates (Objective 3). 
 
 ---
 
-## Objective 3 — Prediction model validation (the scientific crux)
+## Objective 3 — Prediction model (DIAGNOSED 2026-07-30; two-step fix)
 
-The predict-service returned a **flat 0.0419 risk for every instance type/AZ** during the live run. Until this is understood and fixed, the "predictive" claim does not hold. Steps in order:
+The flat `0.0419` was diagnosed — it's a **train/serve bug**, on top of an under-trained model + a weak proxy label. Root causes:
+- **Bug #1 (direct cause):** training standardizes features per group (`dataset.py:51-52` StandardScaler) but the scaler is **discarded** (`train.py:96` saves only `state_dict`), and serving feeds **raw values** (`app.py`, no scaling). → OOD inputs → model collapses to the base rate `0.0419`.
+- **Bug #2:** model trained only `epochs=3` ("just to verify loss drops", `train.py:58`).
+- **Bug #3:** never evaluated — `val_loader` is built but **never used**; only `train_loss` logged. No AUC ever computed.
+- **Bug #4 (secondary):** serving/training skew — `seq_len` 12 vs 24, `select_dtypes()` vs the 13 named columns.
+- **Deeper limit:** the label is a proxy — `is_spike = spot_price > prev_price*1.01` (`dataset.py:38-40`), not real interruptions.
 
-1. **Diagnose the flat score — bug or dead model?** Identical output for every input is a red flag. Check: is the model actually loaded (not a fallback constant)? Are features distinct per input, or does everything collapse to one vector? A model outputting the base rate for everything is underfit/collapsed (common with rare-event data + Focal Loss).
-2. **Get labeled interruption ground truth.** Can't claim "predicts interruptions" without knowing when they actually happened. Spot price alone is a weak proxy — source AWS Spot interruption/rebalance signals as labels. The feature store is stale (April 2026); refresh it.
-3. **Evaluate properly:** **PR-AUC** (not accuracy — interruptions are rare), **lead time** (minutes before reclaim that risk crosses threshold — this *is* the value), **calibration**.
-4. **Answer the killer reviewer question up front:** *"Why predict, when AWS gives a free 2-minute notice?"* Novelty rides on this. The answer must be quantified: predictive checkpointing loses **< the 2-min reactive window**, or pre-migrates to avoid the reclaim. If it can't beat arm 3 (reactive), the predictive claim doesn't hold.
+### Step 1 — Person B, FIRST: make the model actually work (uses current data)
+Do these on the *existing* proxy labels — no new data needed:
+1. **Persist + apply normalization.** Save the scaler (or switch to a fixed/global norm) and apply it at serving (`app.py`). *This alone un-flattens the output.*
+2. **Align serving with training:** `seq_len` and the exact 13 feature columns (names + order).
+3. **Train for real (»3 epochs) and EVALUATE** — wire up the unused `val_loader`: **PR-AUC** (not accuracy — rare events), **lead-time**, **calibration** on held-out data.
 
-**If the model is genuinely flat and unfixable in time:** pivot to a *systems* contribution — the orchestrator + live-EKS migration — with prediction as future work. Do not rest the central claim on 0.0419.
+→ **Deliverable:** a working model + a **baseline PR-AUC on the current proxy labels**. This number decides everything (whether to improve, and prediction-led vs systems-led).
+
+### Step 2 — Person B, ONLY IF Step 1's baseline is worth improving: upgrade to real labels
+Real interruption labels are pulled + versioned in S3 (done, Angshuman):
+```
+s3://argus-feature-store-844641713781/labels/spot_interruption_labels_YYYY-MM-DD.csv
+# regenerate/refresh:  python ml/data/pull_spot_advisor.py --upload-s3
+```
+These are **AWS Spot Instance Advisor interruption frequency per (type, region)** — real, but **aggregate** (a per-type rate, not a per-timestep event).
+- **Option B (recommended):** add each type's real interruption rate as a **feature / prior** alongside the price time-series → keeps the transformer, grounds it in real AWS data instead of the price-spike proxy. Retrain, re-evaluate, **compare to the Step-1 baseline**.
+- **Option A:** relabel the task to risk-tier classification — bigger change, drops the time-series framing.
+
+### Framing decision — Angshuman, at the END (after the numbers exist)
+Pick the strongest result for the 4-page poster:
+- If Step 1/2 yields a real PR-AUC that **beats a reactive baseline** → **prediction-led**.
+- Else → **systems-led** (Objective 1 + Week 6 are rock-solid) with prediction as preliminary/future work. Do **not** rest the headline on `0.0419`.
+And answer the reviewer's killer question: *"why predict when AWS gives a free 2-min notice?"* — quantified (predictive loses < the 2-min reactive window, or pre-migrates to avoid it).
 
 ---
 
