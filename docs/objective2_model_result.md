@@ -5,11 +5,13 @@ pipeline output (`ml/data/features.csv`, 386,868 windowed sequences from live
 `eu-north-1` Spot price history). Reproduce with `python ml/model/train.py`
 then `python ml/model/calibrate_and_finalize.py`.
 
-This went through two rounds: Round 1 fixed the bugs that made the model
+This went through three rounds: Round 1 fixed the bugs that made the model
 useless (flat output). Round 2 fixed methodology problems that were making
 the *measurement* of the model optimistic/pessimistic in different ways, and
-tried a few concrete improvements. Both are recorded below because the
-reasoning matters for anyone touching this code next.
+tried a few concrete improvements. Round 3 tried a real (non-proxy) feature
+and, in the process, surfaced just how much run-to-run variance there is.
+All three are recorded below because the reasoning matters for anyone
+touching this code next.
 
 ## Round 1 — bugs that made the model useless
 
@@ -64,40 +66,70 @@ than a trivial always-predict-safe baseline (badly overconfident).
    data spent), then final numbers reported on a slice that was **never**
    touched by training, early stopping, or calibration.
 
+## Round 3 — real AWS interruption-rate feature
+
+`s3://argus-feature-store-844641713781/labels/` has real Spot Instance Advisor
+interruption-frequency data (pulled via `ml/data/pull_spot_advisor.py`) — an
+actual AWS-published number, not the price-spike proxy. Added it as
+`instance_interruption_rate` (`feature_pipeline.py`, merged per instance type),
+wired into the model as a 14th feature, retrained.
+
+Result: **PR-AUC 0.0172 (7.80x lift) — worse than the 13-feature baseline at
+the time (0.0211).** Same outcome as the cross-AZ feature experiment: reverted,
+kept the feature computed in the pipeline but out of `FEATURE_COLUMNS`, same
+"needs multi-seed validation before trusting either direction" reasoning.
+
+Restoring the 13-feature baseline required one more retrain (identical code
+and config, no changes) — and that run landed a **much** better optimum:
+**PR-AUC 0.0480 (21.76x lift)**, now the shipped checkpoint. This is the same
+config that scored 0.0183 and then 0.0211 in the two earlier runs. Nothing
+changed except the random seed / data loader shuffle order.
+
 ## Final comparison (identical held-out test set: 38,085 windows, 84 positives, base rate 0.221%)
 
-| Model | PR-AUC | Lift vs. random | Brier (calibrated) | Best F1 | Recall | Confusion (TP/FN/FP) |
-|---|---|---|---|---|---|---|
-| **Transformer, 13 features (SHIPPED)** | **0.0211** | **9.55x** | **0.0022** (= trivial baseline) | 0.0947 | 21.4% | 18/66/278 |
-| Transformer, 14 features (+ `az_price_divergence`) | 0.0103 | 4.67x | 0.0022 | 0.0536 | 3.6% | 3/81/25 |
-| XGBoost, 14 features | 0.0037 | 1.66x | 0.1461 (badly miscalibrated) | 0.0157 | 22.6% | 19/65/2315 |
-| Round 1 model (leaky split, broken alpha) | 0.0034 | 4.0x | 0.0036 (worse than trivial) | 0.0097 | 4.6% | 3/62/549 |
+| Model | PR-AUC | Lift vs. random | Brier (calibrated) | Best F1 | Precision | Recall | Confusion (TP/FN/FP) |
+|---|---|---|---|---|---|---|---|
+| **Transformer, 13 features (SHIPPED, latest run)** | **0.0480** | **21.76x** | **0.0022** | 0.1607 | 32.1% | 10.7% | 9/75/19 |
+| Transformer, 13 features (earlier run, same config) | 0.0211 | 9.55x | 0.0022 | 0.0947 | 6.1% | 21.4% | 18/66/278 |
+| Transformer, 13 features (earliest run, same config) | 0.0183 | 8.30x | 0.0026→0.0022 | 0.1139 | 12.2% | 10.7% | 9/75/65 |
+| Transformer, 14 features (+ `instance_interruption_rate`, real AWS data) | 0.0172 | 7.80x | 0.0022 | 0.0826 | 5.1% | 21.4% | 18/66/334 |
+| Transformer, 14 features (+ `az_price_divergence`) | 0.0103 | 4.67x | 0.0022 | 0.0536 | 10.7% | 3.6% | 3/81/25 |
+| XGBoost, 14 features | 0.0037 | 1.66x | 0.1461 (badly miscalibrated) | 0.0157 | 0.8% | 22.6% | 19/65/2315 |
+| Round 1 model (leaky split, broken alpha)¹ | 0.0034 | 4.0x | 0.0036 (worse than trivial) | 0.0097 | 0.5% | 4.6% | 3/62/549 |
+
+¹ Not the same test set — Round 1 predates the leakage fix, so it was measured
+on the old `random_split` validation set (77,374 samples, different split
+methodology entirely). Included only for rough before/after context, not a
+strict apples-to-apples row.
 
 **Takeaways:**
-- Fixing the leakage + FocalLoss bugs alone took PR-AUC from 4x → ~9x base
+- Fixing the leakage + FocalLoss bugs alone took PR-AUC from 4x → 8-22x base
   rate lift on an honestly-measured test set — that's the real effect of
-  Round 2, not noise.
-- The Transformer beats XGBoost by a wide margin here. A lower-capacity model
-  was the hypothesis going in (so few positive examples); it didn't pan out —
-  XGBoost has by far the worst calibration of the three (Brier 66x the
-  trivial baseline) and the weakest ranking signal.
-- The cross-AZ feature is **not shipped**. One run isn't enough evidence to
-  trust either direction with ~200 positive training examples — it needs a
-  multi-seed comparison before being added back (`feature_config.py` has the
-  full reasoning inline).
-- Run-to-run variance is real: two separate runs of the *identical* 13-feature
-  config scored 0.0183 and 0.0211 PR-AUC. Any single number here has a wide
-  error bar — don't over-read small differences between configs.
+  Round 2, not noise. Where exactly in that range depends on the run.
+- **Run-to-run variance is large enough to swamp most feature-engineering
+  decisions.** Three runs of the *identical* 13-feature config scored 0.0183,
+  0.0211, and 0.0480 PR-AUC — a >2.5x spread from nothing but random seed /
+  shuffle order. Treat every number in this table as "somewhere in a wide
+  band," not a precise measurement. Don't conclude a feature helps or hurts
+  from one run either way — that's exactly why the cross-AZ and interruption-rate
+  features were reverted despite scoring reasonably (they were each only one
+  data point, and one data point can't be told apart from noise at this scale).
+- Both new-feature attempts (cross-AZ divergence, real interruption rate)
+  scored *worse* than whatever the 13-feature baseline was at the time they
+  were tested — but given the variance above, that's weak evidence at best.
+  A real answer needs multiple seeds per config, averaged.
+- The Transformer beats XGBoost by a wide margin, consistently. That
+  comparison isn't in doubt the way the feature comparisons are — XGBoost's
+  gap is much larger than the variance band.
 
 ## Serving fix, verified directly (with calibration applied)
 
 ```
-c5.2xlarge  eu-north-1a -> 0.0010
+c5.2xlarge  eu-north-1a -> 0.0012
 c5.2xlarge  eu-north-1b -> 0.0014
 c5.2xlarge  eu-north-1c -> 0.0014
-c5.xlarge   eu-north-1a -> 0.0008
+c5.xlarge   eu-north-1a -> 0.0003
 c5.xlarge   eu-north-1b -> 0.0014
-c5.xlarge   eu-north-1c -> 0.0014
 ```
 
 Scores vary per instance/AZ (flat-`0.0419` bug fixed) and now sit in a
@@ -121,7 +153,9 @@ how early the model predicts price spikes, not interruptions.
 
 **Say in the paper:** *"the reactive path (Objective 1) is validated on real
 Spot infrastructure; the predictive model is trained, evaluated, and
-calibrated on a held-out test set with a real (~9.5x base rate) but weak
-signal — usable as a secondary/advisory signal, not a primary trigger. The
-ceiling is the proxy label, not the model or pipeline; real interruption
-ground truth is future work."*
+calibrated on a held-out test set with a real but weak and noisy signal
+(observed 8-22x base-rate lift across repeated runs of the same config) —
+usable as a secondary/advisory signal, not a primary trigger. The ceiling is
+the proxy label and the small number of positive examples (not the model or
+pipeline); real interruption ground truth and multi-seed evaluation are
+future work."*
