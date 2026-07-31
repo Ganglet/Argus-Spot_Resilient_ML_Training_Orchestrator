@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import glob
 
 # Approximate On-Demand prices for your eu-north-1 region (in USD/hr)
 # The ML model uses this to understand if Spot is currently cheap or expensive relatively.
@@ -62,7 +63,26 @@ def process_ts_group(group: pd.DataFrame) -> pd.DataFrame:
     
     return group.reset_index()
 
-def build_features(input_csv: str, output_csv: str):
+def load_interruption_rates(labels_dir: str, region: str = "eu-north-1", os_name: str = "Linux") -> pd.DataFrame:
+    """
+    Real interruption-frequency data published by AWS's Spot Instance Advisor
+    (pulled via pull_spot_advisor.py). Aggregate per (region, instance_type) -
+    not a per-timestep event - but it's a real signal, unlike the price-spike
+    proxy label the model is trained against.
+    """
+    files = sorted(glob.glob(os.path.join(labels_dir, "spot_interruption_labels_*.csv")))
+    if not files:
+        raise FileNotFoundError(
+            f"No spot_interruption_labels_*.csv in {labels_dir}. "
+            f"Run: python ml/data/pull_spot_advisor.py --region {region}"
+        )
+    latest = files[-1]
+    print(f"Loading interruption rates from {latest}...")
+    labels = pd.read_csv(latest)
+    labels = labels[(labels["region"] == region) & (labels["os"] == os_name)]
+    return labels[["instance_type", "interruption_rate_max_pct"]].drop_duplicates("instance_type")
+
+def build_features(input_csv: str, output_csv: str, labels_dir: str = None):
     print(f"Loading raw data from {input_csv}...")
     df = pd.read_csv(input_csv, parse_dates=["timestamp"])
     
@@ -94,6 +114,15 @@ def build_features(input_csv: str, output_csv: str):
     ).fillna(0)
     final_df = final_df.drop(columns=["instance_type_az_mean_price"])
 
+    # Real interruption rate (AWS Spot Instance Advisor), per instance type. This is
+    # the same value for every row of a given instance type - a prior, not a
+    # time-varying signal - but it's real AWS data instead of the price-spike proxy.
+    if labels_dir is not None:
+        rates = load_interruption_rates(labels_dir)
+        final_df = final_df.merge(rates, on="instance_type", how="left")
+        final_df = final_df.rename(columns={"interruption_rate_max_pct": "instance_interruption_rate"})
+        final_df["instance_interruption_rate"] = final_df["instance_interruption_rate"].fillna(0) / 100.0
+
     # Drop rows where we don't have enough data (just clean up)
     final_df = final_df.dropna()
     
@@ -108,9 +137,10 @@ if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))
     in_path = os.path.join(base_dir, "raw_spot_prices.csv")
     out_path = os.path.join(base_dir, "features.csv")
-    
+    labels_dir = os.path.join(base_dir, "labels")
+
     if not os.path.exists(in_path):
         print(f"Error: {in_path} not found. Run fetch_spot_prices.py first.")
         exit(1)
-        
-    build_features(in_path, out_path)
+
+    build_features(in_path, out_path, labels_dir=labels_dir)

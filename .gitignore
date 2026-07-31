@@ -29,6 +29,7 @@ ml/model/model_metadata.json
 mlruns/
 ml/data/*.csv
 ml/data/*.png
+ml/data/labels/
 
 # Misc
 .DS_Store
