@@ -67,12 +67,18 @@ def train_model():
     model.to(device)
 
     # 3. Handle Imbalance with Focal Loss
-    criterion = FocalLoss(alpha=0.75, gamma=2.0)
+    # alpha=0.75, gamma=1.0 — from tune_focal_loss.py's grid search (after fixing the
+    # alpha bug: it used to be applied as a flat scalar to every sample regardless of
+    # label, which is a no-op for class balance).
+    focal_alpha, focal_gamma = 0.75, 1.0
+    criterion = FocalLoss(alpha=focal_alpha, gamma=focal_gamma)
     optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    # 4. Training Loop — real run, not a smoke test. Early-stops on validation loss so we
-    # don't hand-pick an epoch count; nobody was checking val performance before (it built
-    # val_loader and never touched it).
+    # 4. Training Loop — real run, not a smoke test. Early-stops on val PR-AUC, not val
+    # loss: on a ~0.08% positive rate, val loss barely moves epoch to epoch (dominated
+    # by the 99.9% negatives it already gets right), so it's a poor signal for whether
+    # the model is actually getting better at the thing we care about — ranking the
+    # rare positives higher.
     max_epochs = 25
     patience = 5
 
@@ -87,7 +93,7 @@ def train_model():
     scaler_path = os.path.join(base_dir, "spot_scaler.joblib")
     metadata_path = os.path.join(base_dir, "model_metadata.json")
 
-    best_val_loss = float('inf')
+    best_val_pr_auc = -1.0
     epochs_without_improvement = 0
 
     with mlflow.start_run():
@@ -95,8 +101,8 @@ def train_model():
         mlflow.log_param("patience", patience)
         mlflow.log_param("batch_size", batch_size)
         mlflow.log_param("learning_rate", lr)
-        mlflow.log_param("focal_alpha", 0.75)
-        mlflow.log_param("focal_gamma", 2.0)
+        mlflow.log_param("focal_alpha", focal_alpha)
+        mlflow.log_param("focal_gamma", focal_gamma)
         mlflow.log_param("d_model", d_model)
         mlflow.log_param("nhead", nhead)
         mlflow.log_param("num_layers", num_layers)
@@ -143,8 +149,8 @@ def train_model():
 
             print(f"==> Epoch {epoch+1} Complete. Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val PR-AUC: {val_pr_auc:.4f}\n")
 
-            if avg_val_loss < best_val_loss:
-                best_val_loss = avg_val_loss
+            if val_pr_auc > best_val_pr_auc:
+                best_val_pr_auc = val_pr_auc
                 epochs_without_improvement = 0
 
                 # 5. Save the best checkpoint + the exact preprocessing needed to serve it.
@@ -158,18 +164,20 @@ def train_model():
                         "d_model": d_model,
                         "nhead": nhead,
                         "num_layers": num_layers,
+                        "focal_alpha": focal_alpha,
+                        "focal_gamma": focal_gamma,
                         "best_epoch": epoch + 1,
                         "val_loss": avg_val_loss,
                         "val_pr_auc": val_pr_auc,
                     }, f, indent=2)
-                print(f"    New best val_loss {avg_val_loss:.4f} — saved checkpoint, scaler, and metadata.")
+                print(f"    New best val_pr_auc {val_pr_auc:.4f} — saved checkpoint, scaler, and metadata.")
             else:
                 epochs_without_improvement += 1
                 if epochs_without_improvement >= patience:
-                    print(f"No val_loss improvement for {patience} epochs — stopping early at epoch {epoch+1}.")
+                    print(f"No val_pr_auc improvement for {patience} epochs — stopping early at epoch {epoch+1}.")
                     break
 
-        mlflow.log_metric("best_val_loss", best_val_loss)
+        mlflow.log_metric("best_val_pr_auc", best_val_pr_auc)
         mlflow.pytorch.log_model(model, "model")
         print(f"Best model saved to {checkpoint_path} (scaler: {scaler_path}, metadata: {metadata_path})")
 
