@@ -72,10 +72,18 @@ Actual Risk                62              3
 **Read this honestly, not optimistically:** the validation base rate is
 65 / 77,374 = 0.084%. A model with *zero* signal would score PR-AUC ≈ 0.00084.
 This model scores 0.0034 — roughly **4x the base rate**, i.e. a real but weak
-signal, not a strong discriminator. The Brier score (0.0036) is low mostly
-because predictions correctly cluster near 0 for the overwhelming majority
-class, which is easy when 99.9% of labels *are* 0 — it is not strong evidence
-of good calibration at the risk end of the distribution.
+signal, not a strong discriminator.
+
+The Brier score is worse than it looks: a trivial model that always predicts
+"safe" (~0) gets Brier ≈ 0.00084 on this base rate. This model gets **0.0036
+— over 4x worse than that trivial baseline.** That means it is systematically
+over-predicting risk (its outputs sit around 0.05–0.09 rather than near-0),
+not well-calibrated at the low end as a first read might suggest. Most likely
+cause: Focal Loss optimizes for ranking rare positives, not calibrated
+probabilities, and a single global scaler averages over instance types with
+very different absolute price scales. If calibrated probabilities matter for
+the paper's threshold-setting story, that needs a calibration pass (Platt
+scaling / isotonic regression) on top of this checkpoint — not done here.
 
 ## Serving fix, verified directly
 
