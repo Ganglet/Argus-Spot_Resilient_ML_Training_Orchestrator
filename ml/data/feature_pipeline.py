@@ -75,7 +75,25 @@ def build_features(input_csv: str, output_csv: str):
         processed_groups.append(processed_df)
         
     final_df = pd.concat(processed_groups, ignore_index=True)
-    
+
+    # Cross-AZ signal: how does this AZ's price compare to its sibling AZs for the
+    # SAME instance type at the SAME timestamp? A single AZ pricing away from its
+    # siblings is a classic precursor to an AZ-specific capacity crunch / reclaim -
+    # a signal the previous feature set couldn't see at all, since every feature was
+    # computed within one (instance_type, AZ) series in isolation.
+    az_stats = (
+        final_df.groupby(["instance_type", "timestamp"])["spot_price"]
+        .mean()
+        .rename("instance_type_az_mean_price")
+        .reset_index()
+    )
+    final_df = final_df.merge(az_stats, on=["instance_type", "timestamp"], how="left")
+    final_df["az_price_divergence"] = (
+        (final_df["spot_price"] - final_df["instance_type_az_mean_price"])
+        / final_df["instance_type_az_mean_price"].replace(0, np.nan)
+    ).fillna(0)
+    final_df = final_df.drop(columns=["instance_type_az_mean_price"])
+
     # Drop rows where we don't have enough data (just clean up)
     final_df = final_df.dropna()
     
