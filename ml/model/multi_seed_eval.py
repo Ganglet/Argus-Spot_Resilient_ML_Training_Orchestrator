@@ -44,6 +44,13 @@ def multi_seed_eval(seeds=(0, 1, 2, 3, 4), max_epochs=15):
         finally:
             shutil.rmtree(scratch_dir, ignore_errors=True)
 
+        # Write after every seed, not just at the end - if this process gets killed
+        # mid-sweep (has happened before with long background runs in this repo),
+        # whatever seeds finished are still on disk instead of lost.
+        partial_path = os.path.join(base_dir, "multi_seed_results.json")
+        with open(partial_path, "w") as f:
+            json.dump({"seeds_completed": [r["seed"] for r in results], "runs": results}, f, indent=2)
+
     pr_aucs = [r["pr_auc"] for r in results]
     briers = [r["brier"] for r in results]
 
