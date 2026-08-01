@@ -62,6 +62,23 @@ def wait_for_checkpoint(events_path, policy, timeout, since_ts):
     return False
 
 
+def wait_for_ready(events_path, since_ts, timeout=15.0):
+    """Block until the freshly (re)spawned job logs started/resumed. Without this, a
+    respawn that's still importing torch can get killed again by the very next cycle
+    before it ever reaches its training loop - at high interruption rates (risk_lead
+    or notice_lead >= mean time between interruptions) this compounds into a busy
+    loop of respawns that never actually checkpoint anything, silently degrading the
+    reactive/predictive arms to no-protection-with-extra-overhead. Bug found running
+    the predictive arm at rate=120s: 24 respawns, 1 real checkpoint."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for ev in read_events(events_path):
+            if ev.get("event") in ("started", "resumed") and ev["ts"] >= since_ts:
+                return True
+        time.sleep(0.02)
+    return False
+
+
 def spawn_job(run_dir, arm_config_path, step_budget, step_time_sec, synthetic):
     os.makedirs(run_dir, exist_ok=True)
     log_path = os.path.join(run_dir, "stdout.log")
@@ -78,11 +95,15 @@ def spawn_job(run_dir, arm_config_path, step_budget, step_time_sec, synthetic):
     return subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT)
 
 
-def kill_and_respawn(proc, spawn_fn):
+def kill_and_respawn(proc, spawn_fn, events_path=None):
     if proc.poll() is None:
         proc.kill()
         proc.wait()
-    return spawn_fn()
+    since = time.time()
+    new_proc = spawn_fn()
+    if events_path is not None:
+        wait_for_ready(events_path, since)
+    return new_proc
 
 
 def run_cycle(arm, run_dir, proc, events_path, harness_path, rng, rate_seconds, spawn_fn):
@@ -100,7 +121,7 @@ def run_cycle(arm, run_dir, proc, events_path, harness_path, rng, rate_seconds, 
         log_event(harness_path, "risk_triggered", scheduled_kill_at=T, lead_seconds=risk_lead)
         confirmed = wait_for_checkpoint(events_path, "predictive", timeout=max(0.2, min(2.0, T - time.time())), since_ts=since)
         if migrates:
-            proc = kill_and_respawn(proc, spawn_fn)
+            proc = kill_and_respawn(proc, spawn_fn, events_path)
             log_event(harness_path, "migrated", risk_confirmed=confirmed)
             return proc, "migrated"
 
@@ -112,7 +133,7 @@ def run_cycle(arm, run_dir, proc, events_path, harness_path, rng, rate_seconds, 
 
     if wait_until(T, proc):
         return proc, "job_exited"
-    proc = kill_and_respawn(proc, spawn_fn)
+    proc = kill_and_respawn(proc, spawn_fn, events_path)
     log_event(harness_path, "interrupted")
     return proc, "interrupted"
 
@@ -138,6 +159,7 @@ def run_trial(arm, rate_seconds, rep, results_root, step_budget, step_time_sec, 
     run_start = time.time()
     max_deadline = run_start + step_budget * step_time_sec * max_wallclock_multiplier
     proc = spawn_fn()
+    wait_for_ready(events_path, run_start)
 
     outcome = "unknown"
     while True:
