@@ -104,7 +104,7 @@ def evaluate_thresholds():
 
     print("Note: lead-time and against-real-interruption evaluation are NOT covered here —")
     print("the label is a price-spike proxy (is_spike), not a real AWS reclaim event. See")
-    print("docs/objective2_model_result.md for the honest framing of what this measures.")
+    print("docs/objective3_result.md for the honest framing of what this measures.")
 
 if __name__ == "__main__":
     evaluate_thresholds()

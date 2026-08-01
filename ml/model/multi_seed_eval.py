@@ -11,7 +11,7 @@ def multi_seed_eval(seeds=(0, 1, 2, 3, 4), max_epochs=15):
     """
     Single training runs on this dataset are noisy - three runs of the identical
     13-feature config scored PR-AUC 0.0183, 0.0211, and 0.0480 (see
-    docs/objective2_model_result.md). Reporting any one of those as "the" model
+    docs/objective3_result.md). Reporting any one of those as "the" model
     quality is misleading. This trains N seeds from scratch, evaluates each on the
     same held-out test set, and reports mean/std - the number that actually belongs
     in the paper.

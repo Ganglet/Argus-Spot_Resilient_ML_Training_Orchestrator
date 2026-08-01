@@ -1,4 +1,4 @@
-# Objective 2 Result — Predictive Model, Real Training Run (2026-07-31)
+# Objective 3 Result — Predictive Model, Real Training Run (2026-07-31)
 
 Honest results for the paper figure. Trained and evaluated on the real feature
 pipeline output (`ml/data/features.csv`, 386,868 windowed sequences from live
