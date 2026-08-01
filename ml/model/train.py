@@ -3,7 +3,9 @@ import torch.nn as nn
 import torch.optim as optim
 import os
 import json
+import random
 import joblib
+import numpy as np
 import mlflow
 import mlflow.pytorch
 from sklearn.metrics import average_precision_score
@@ -36,19 +38,31 @@ class FocalLoss(nn.Module):
         focal_loss = alpha_t * (1 - pt) ** self.gamma * bce_loss
         return focal_loss.mean()
 
-def train_model():
+def train_model(seed: int = None, output_dir: str = None, max_epochs: int = 25, run_name: str = None):
     """
     Executes a local training run of the Spot Predictor on the downloaded AWS data.
+
+    seed: if set, seeds torch/numpy/random for a reproducible run (needed for
+        multi_seed_eval.py to report a real mean/std instead of one noisy draw).
+    output_dir: where to write the checkpoint/scaler/metadata. Defaults to this
+        file's directory (the "shipped" location); multi_seed_eval.py points this
+        at a scratch dir per seed so sweep runs don't clobber the shipped model.
     """
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
     features_csv = os.path.join(base_dir, "../data/features.csv")
-    
+    output_dir = output_dir or base_dir
+
     if not os.path.exists(features_csv):
         print(f"Error: {features_csv} not found. Run dataset generation first.")
         return
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Executing Training Loop on {device}... This might take a bit.")
+    print(f"Executing Training Loop on {device} (seed={seed})... This might take a bit.")
 
     # 1. Build DataLoader
     batch_size = 128
@@ -79,7 +93,6 @@ def train_model():
     # by the 99.9% negatives it already gets right), so it's a poor signal for whether
     # the model is actually getting better at the thing we care about — ranking the
     # rare positives higher.
-    max_epochs = 25
     patience = 5
 
     # SQLite backend, not file:// — the raw path used to crash on Windows path
@@ -89,14 +102,16 @@ def train_model():
     mlflow.set_tracking_uri(f"sqlite:///{db_path}")
     mlflow.set_experiment("Spot-Interruption-Predictor")
 
-    checkpoint_path = os.path.join(base_dir, "spot_transformer.pt")
-    scaler_path = os.path.join(base_dir, "spot_scaler.joblib")
-    metadata_path = os.path.join(base_dir, "model_metadata.json")
+    os.makedirs(output_dir, exist_ok=True)
+    checkpoint_path = os.path.join(output_dir, "spot_transformer.pt")
+    scaler_path = os.path.join(output_dir, "spot_scaler.joblib")
+    metadata_path = os.path.join(output_dir, "model_metadata.json")
 
     best_val_pr_auc = -1.0
     epochs_without_improvement = 0
 
-    with mlflow.start_run():
+    with mlflow.start_run(run_name=run_name):
+        mlflow.log_param("seed", seed)
         mlflow.log_param("max_epochs", max_epochs)
         mlflow.log_param("patience", patience)
         mlflow.log_param("batch_size", batch_size)
@@ -180,6 +195,13 @@ def train_model():
         mlflow.log_metric("best_val_pr_auc", best_val_pr_auc)
         mlflow.pytorch.log_model(model, "model")
         print(f"Best model saved to {checkpoint_path} (scaler: {scaler_path}, metadata: {metadata_path})")
+
+    return {
+        "checkpoint_path": checkpoint_path,
+        "scaler_path": scaler_path,
+        "metadata_path": metadata_path,
+        "best_val_pr_auc": best_val_pr_auc,
+    }
 
 if __name__ == "__main__":
     train_model()

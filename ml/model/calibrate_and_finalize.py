@@ -21,7 +21,7 @@ def _predict_raw(model, sequences, device, batch_size=256):
             probs.append(torch.sigmoid(model(x)).cpu().numpy().flatten())
     return np.concatenate(probs)
 
-def calibrate_and_finalize():
+def evaluate_checkpoint(model_dir: str, verbose: bool = True) -> dict:
     """
     1. Fits Platt scaling (a 1-feature logistic regression on the raw logit) on the
        SAME data train.py already used for early stopping - no new data spent.
@@ -31,13 +31,21 @@ def calibrate_and_finalize():
     2. Reports final PR-AUC / Brier / F1 / confusion matrix on a held-out test slice
        that was NEVER used for gradient updates, early stopping, or calibration -
        these are the numbers that go in the paper.
+
+    model_dir: directory containing spot_transformer.pt / spot_scaler.joblib /
+        model_metadata.json for the checkpoint to evaluate. Factored out from the
+        CLI script so multi_seed_eval.py can evaluate several checkpoints in a row.
     """
     base_dir = os.path.dirname(os.path.abspath(__file__))
     features_csv = os.path.join(base_dir, "../data/features.csv")
-    model_path = os.path.join(base_dir, "spot_transformer.pt")
-    scaler_path = os.path.join(base_dir, "spot_scaler.joblib")
-    metadata_path = os.path.join(base_dir, "model_metadata.json")
-    calibrator_path = os.path.join(base_dir, "spot_calibrator.joblib")
+    model_path = os.path.join(model_dir, "spot_transformer.pt")
+    scaler_path = os.path.join(model_dir, "spot_scaler.joblib")
+    metadata_path = os.path.join(model_dir, "model_metadata.json")
+    calibrator_path = os.path.join(model_dir, "spot_calibrator.joblib")
+
+    def log(*args):
+        if verbose:
+            print(*args)
 
     with open(metadata_path) as f:
         metadata = json.load(f)
@@ -55,14 +63,14 @@ def calibrate_and_finalize():
 
     dataset = SpotPriceDataset(csv_file_path=features_csv, scaler=scaler)
     calib_idx, test_idx = val_calibration_test_split(dataset.group_ranges, train_split=0.8)
-    print(f"Calibration-fit set: {len(calib_idx)} windows | Held-out test set: {len(test_idx)} windows")
+    log(f"Calibration-fit set: {len(calib_idx)} windows | Held-out test set: {len(test_idx)} windows")
 
     calib_probs_raw = _predict_raw(model, dataset.sequences[calib_idx], device)
     calib_labels = dataset.labels[calib_idx]
     test_probs_raw = _predict_raw(model, dataset.sequences[test_idx], device)
     test_labels = dataset.labels[test_idx]
 
-    print(f"Calibration set positives: {int(calib_labels.sum())} | Test set positives: {int(test_labels.sum())}")
+    log(f"Calibration set positives: {int(calib_labels.sum())} | Test set positives: {int(test_labels.sum())}")
 
     # Platt scaling: fit calibrated_prob = sigmoid(a * raw_logit + b) via logistic
     # regression on the RAW LOGIT (not the already-squashed probability - fitting on
@@ -84,20 +92,25 @@ def calibrate_and_finalize():
         f1s = 2 * (precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-10)
         best_idx = np.argmax(f1s) if len(f1s) else 0
         base_rate = labels.sum() / len(labels)
-        print(f"\n--- {name} (base rate {base_rate:.5f}) ---")
-        print(f"PR-AUC: {pr_auc:.4f}  (lift over random: {pr_auc / base_rate:.2f}x)")
-        print(f"Brier:  {brier:.4f}  (trivial always-safe baseline: {base_rate:.4f})")
+        log(f"\n--- {name} (base rate {base_rate:.5f}) ---")
+        log(f"PR-AUC: {pr_auc:.4f}  (lift over random: {pr_auc / base_rate:.2f}x)")
+        log(f"Brier:  {brier:.4f}  (trivial always-safe baseline: {base_rate:.4f})")
+        result = {"pr_auc": pr_auc, "brier": brier}
         if len(f1s):
-            print(f"Best F1: {f1s[best_idx]:.4f} @ threshold {thresholds[best_idx]:.4f} "
-                  f"(precision {precisions[best_idx]:.4f}, recall {recalls[best_idx]:.4f})")
+            log(f"Best F1: {f1s[best_idx]:.4f} @ threshold {thresholds[best_idx]:.4f} "
+                f"(precision {precisions[best_idx]:.4f}, recall {recalls[best_idx]:.4f})")
             cm = confusion_matrix(labels, (probs >= thresholds[best_idx]).astype(int))
-            print(f"TN {cm[0][0]} FP {cm[0][1]} FN {cm[1][0]} TP {cm[1][1]}")
-        return {"pr_auc": pr_auc, "brier": brier}
+            log(f"TN {cm[0][0]} FP {cm[0][1]} FN {cm[1][0]} TP {cm[1][1]}")
+            result.update({
+                "f1": f1s[best_idx], "precision": precisions[best_idx], "recall": recalls[best_idx],
+                "tn": int(cm[0][0]), "fp": int(cm[0][1]), "fn": int(cm[1][0]), "tp": int(cm[1][1]),
+            })
+        return result
 
-    print("\n" + "=" * 55)
-    print("FINAL numbers on held-out test set (never used for training,")
-    print("early stopping, or calibration):")
-    print("=" * 55)
+    log("\n" + "=" * 55)
+    log("FINAL numbers on held-out test set (never used for training,")
+    log("early stopping, or calibration):")
+    log("=" * 55)
     uncalibrated = report("Uncalibrated (raw sigmoid)", test_labels, test_probs_raw)
     calibrated = report("Calibrated (Platt scaling)", test_labels, test_probs_calibrated)
 
@@ -112,7 +125,10 @@ def calibrate_and_finalize():
     }
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
-    print(f"\nCalibrator saved to {calibrator_path}, metadata updated.")
+    log(f"\nCalibrator saved to {calibrator_path}, metadata updated.")
+
+    return {"uncalibrated": uncalibrated, "calibrated": calibrated, "test_positives": int(test_labels.sum())}
 
 if __name__ == "__main__":
-    calibrate_and_finalize()
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    evaluate_checkpoint(base_dir)
