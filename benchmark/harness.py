@@ -138,6 +138,18 @@ def run_cycle(arm, run_dir, proc, events_path, harness_path, rng, rate_seconds, 
     return proc, "interrupted"
 
 
+def trial_already_done(run_dir):
+    """A full 4-arm x 4-rate x 5-rep sweep can run for hours; this repo has already
+    had long background runs killed mid-way (see docs/objective3_result.md training
+    history). Skipping trials with a terminal outcome already on disk means a
+    restart resumes instead of redoing everything."""
+    harness_path = os.path.join(run_dir, "harness.jsonl")
+    for ev in read_events(harness_path):
+        if ev.get("event") in ("job_exit", "timed_out"):
+            return True
+    return False
+
+
 def run_trial(arm, rate_seconds, rep, results_root, step_budget, step_time_sec, synthetic, seed, max_wallclock_multiplier):
     run_dir = os.path.join(results_root, arm["name"], f"rate_{rate_seconds}s", f"rep_{rep}")
     os.makedirs(run_dir, exist_ok=True)
@@ -190,6 +202,7 @@ def main():
     parser.add_argument("--results-dir", default=os.path.join(HERE, "results", "raw"))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-wallclock-multiplier", type=float, default=4.0)
+    parser.add_argument("--force", action="store_true", help="rerun trials even if already completed")
     args = parser.parse_args()
 
     if args.arms == "all":
@@ -210,6 +223,10 @@ def main():
         for rate in rates:
             for rep in range(args.reps):
                 done += 1
+                run_dir = os.path.join(args.results_dir, arm["name"], f"rate_{rate}s", f"rep_{rep}")
+                if not args.force and trial_already_done(run_dir):
+                    print(f"[{done}/{total}] arm={arm['name']} rate={rate}s rep={rep} -> already done, skipping")
+                    continue
                 print(f"[{done}/{total}] arm={arm['name']} rate={rate}s rep={rep}")
                 run_dir, outcome = run_trial(
                     arm, rate, rep, args.results_dir, args.step_budget, args.step_time_sec,
