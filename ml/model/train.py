@@ -11,7 +11,7 @@ import mlflow.pytorch
 from sklearn.metrics import average_precision_score
 from dataset import create_dataloaders
 from transformer import SpotInterruptionPredictor
-from feature_config import FEATURE_COLUMNS, SEQ_LENGTH
+from feature_config import FEATURE_COLUMNS, SEQ_LENGTH, PREDICTION_HORIZON
 
 class FocalLoss(nn.Module):
     """
@@ -38,7 +38,8 @@ class FocalLoss(nn.Module):
         focal_loss = alpha_t * (1 - pt) ** self.gamma * bce_loss
         return focal_loss.mean()
 
-def train_model(seed: int = None, output_dir: str = None, max_epochs: int = 25, run_name: str = None):
+def train_model(seed: int = None, output_dir: str = None, max_epochs: int = 25, run_name: str = None,
+                 prediction_horizon: int = None, spike_threshold: float = 1.01, oversample: bool = False):
     """
     Executes a local training run of the Spot Predictor on the downloaded AWS data.
 
@@ -47,6 +48,9 @@ def train_model(seed: int = None, output_dir: str = None, max_epochs: int = 25, 
     output_dir: where to write the checkpoint/scaler/metadata. Defaults to this
         file's directory (the "shipped" location); multi_seed_eval.py points this
         at a scratch dir per seed so sweep runs don't clobber the shipped model.
+    prediction_horizon/spike_threshold/oversample: label/sampling config, tuned by
+        tune_data_config.py. Defaults (None horizon -> feature_config's SEQ_LENGTH-linked
+        default, threshold=1.01, oversample=False) reproduce the originally shipped config.
     """
     if seed is not None:
         random.seed(seed)
@@ -66,10 +70,14 @@ def train_model(seed: int = None, output_dir: str = None, max_epochs: int = 25, 
 
     # 1. Build DataLoader
     batch_size = 128
+    horizon = prediction_horizon if prediction_horizon is not None else PREDICTION_HORIZON
     train_loader, val_loader, input_features, scaler = create_dataloaders(
         csv_path=features_csv,
         batch_size=batch_size,
-        train_split=0.8
+        train_split=0.8,
+        prediction_horizon=horizon,
+        spike_threshold=spike_threshold,
+        oversample=oversample,
     )
 
     # 2. Define Model (from transformer.py)
@@ -175,6 +183,9 @@ def train_model(seed: int = None, output_dir: str = None, max_epochs: int = 25, 
                     json.dump({
                         "feature_columns": FEATURE_COLUMNS,
                         "seq_length": SEQ_LENGTH,
+                        "prediction_horizon": horizon,
+                        "spike_threshold": spike_threshold,
+                        "oversample": oversample,
                         "num_features": input_features,
                         "d_model": d_model,
                         "nhead": nhead,

@@ -11,6 +11,7 @@ from sklearn.metrics import (
 
 from dataset import SpotPriceDataset, val_calibration_test_split
 from transformer import SpotInterruptionPredictor
+from feature_config import PREDICTION_HORIZON
 
 def _predict_raw(model, sequences, device, batch_size=256):
     """Raw sigmoid probabilities (uncalibrated) for a numpy array of windows."""
@@ -61,7 +62,11 @@ def evaluate_checkpoint(model_dir: str, verbose: bool = True) -> dict:
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
-    dataset = SpotPriceDataset(csv_file_path=features_csv, scaler=scaler)
+    dataset = SpotPriceDataset(
+        csv_file_path=features_csv, scaler=scaler,
+        prediction_horizon=metadata.get("prediction_horizon", PREDICTION_HORIZON),
+        spike_threshold=metadata.get("spike_threshold", 1.01),
+    )
     calib_idx, test_idx = val_calibration_test_split(dataset.group_ranges, train_split=0.8)
     log(f"Calibration-fit set: {len(calib_idx)} windows | Held-out test set: {len(test_idx)} windows")
 
@@ -127,7 +132,11 @@ def evaluate_checkpoint(model_dir: str, verbose: bool = True) -> dict:
         json.dump(metadata, f, indent=2)
     log(f"\nCalibrator saved to {calibrator_path}, metadata updated.")
 
-    return {"uncalibrated": uncalibrated, "calibrated": calibrated, "test_positives": int(test_labels.sum())}
+    return {
+        "uncalibrated": uncalibrated, "calibrated": calibrated,
+        "test_positives": int(test_labels.sum()), "test_size": len(test_labels),
+        "test_probs_calibrated": test_probs_calibrated.tolist(), "test_labels": test_labels.tolist(),
+    }
 
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))

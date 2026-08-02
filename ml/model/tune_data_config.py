@@ -84,18 +84,27 @@ def tune_data_config():
                 print("    no positives in sampled val batches, skipping")
                 continue
             pr_auc = average_precision_score(val_labels, val_probs)
+            # Different (threshold, horizon) combos relabel the data - each has its own
+            # base rate, and PR-AUC's own "no skill" baseline rises with the base rate.
+            # Comparing raw PR-AUC across configs with different base rates isn't a fair
+            # comparison (a config can "look better" purely because the task got easier,
+            # not because the model discriminates better) - rank by lift over THIS
+            # config's own base rate instead.
+            base_rate = sum(val_labels) / len(val_labels)
+            lift = pr_auc / base_rate
             mlflow.log_metric("val_pr_auc_sample", pr_auc)
-            print(f"    val PR-AUC (sampled): {pr_auc:.4f}")
-            results.append((config, pr_auc))
+            mlflow.log_metric("val_lift_sample", lift)
+            print(f"    val PR-AUC (sampled): {pr_auc:.4f}  base_rate: {base_rate:.5f}  lift: {lift:.2f}x")
+            results.append((config, pr_auc, base_rate, lift))
 
-    results.sort(key=lambda r: r[1], reverse=True)
+    results.sort(key=lambda r: r[3], reverse=True)
     print("\n" + "=" * 60)
-    print("Data config tuning results (best first):")
+    print("Data config tuning results (best lift first):")
     print("=" * 60)
-    for config, pr_auc in results:
-        print(f"  {config} -> val_pr_auc={pr_auc:.4f}")
-    best_config, best_pr_auc = results[0]
-    print(f"\nBest: {best_config} -> val_pr_auc={best_pr_auc:.4f}")
+    for config, pr_auc, base_rate, lift in results:
+        print(f"  {config} -> pr_auc={pr_auc:.4f}  base_rate={base_rate:.5f}  lift={lift:.2f}x")
+    best_config, best_pr_auc, best_base_rate, best_lift = results[0]
+    print(f"\nBest by lift: {best_config} -> lift={best_lift:.2f}x (pr_auc={best_pr_auc:.4f}, base_rate={best_base_rate:.5f})")
     return best_config
 
 if __name__ == "__main__":
