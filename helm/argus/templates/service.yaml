@@ -1,0 +1,21 @@
+# Exposes the operator's Prometheus metrics endpoint (metrics.py :8080) so
+# Prometheus can scrape it. The operator has no other network surface — this
+# Service exists only for metrics.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-operator-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-operator
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.metrics.port }}"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: {{ .Release.Name }}-operator
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics

@@ -8,6 +8,10 @@ operator:
   riskThreshold: 0.65
   predictServiceUrl: http://argus-predict-service:8000
 
+metrics:
+  # Port the operator's Prometheus client serves on (metrics.py start_http_server).
+  port: 8080
+
 aws:
   region: eu-north-1
   checkpointBucket: argus-checkpoints-844641713781

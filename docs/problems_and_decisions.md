@@ -280,3 +280,30 @@ Reactive Spot-interruption survival validated end-to-end on **real Spot nodes** 
 **vs Week 6:** Week 6 used the operator's cordon with `grace_period_seconds=0` (SIGKILL, no SIGTERM checkpoint). Objective 1 exercises the *real* NTH drain with a graceful SIGTERM checkpoint — a materially stronger claim.
 
 **Still open:** FIS-issued reclaim (a genuine AWS termination via IMDS) pending the account-plan fix (P-019). Injection stands on its own; FIS would add "AWS actually pulled the instance."
+
+---
+
+## Week 7 — Observability (Prometheus + Grafana), 2026-08-02
+
+Metrics were emitted since Week 6 (`metrics.py` on `:8080`, recorded in the reconcile loop) but nothing collected or displayed them. Week 7 closes the loop and captures the dashboard figure for the poster. Full write-up in `docs/A6_observability.md`. Built + screenshotted on **minikube** (real operator, real S3/SQS) to stay `$0` — see ADR-008. Problems hit, in order:
+
+### P-023 — Helm couldn't install over the 105-day-old operator objects
+`helm upgrade --install argus` refused: the `argus-operator` ServiceAccount, ClusterRole, ClusterRoleBinding and the `spotresilientjobs.argus.io` CRD already existed from the Week 4-5 `operator/rbac.yaml` + `kubectl apply` and were **not Helm-owned** (`missing key app.kubernetes.io/managed-by`). Adopting them via labels/annotations got further but then hit a field-manager conflict on the ClusterRole's `.rules` (`conflict with "kubectl-client-side-apply"`).
+**Fix:** `helm uninstall` + delete the four stale pre-Helm objects (no `SpotResilientJob` CRs existed → cascade-safe) + clean `helm install`. **Lesson:** objects created by raw `kubectl apply` in earlier weeks can't be cleanly adopted by Helm when their spec differs; delete-and-let-Helm-own is simpler than adoption when nothing depends on them.
+
+### P-024 — CRD vanished mid-reset → `server could not find spotresilientjobs.argus.io`
+During the P-023 churn the CRD got deleted, and the subsequent `helm install` did **not** recreate it — the chart's `templates/crd.yaml` no-op'd because the CRD still existed at install time, then a later delete removed it. A stuck 106-day-old `cifar10-test` CR also blocked things (kopf finalizer left it `Terminating`).
+**Fix:** cleared the stuck CR by removing its finalizer (`kubectl patch ... -p '{"metadata":{"finalizers":[]}}'`), then applied the CRD directly (`kubectl apply -f operator/crd/spotresilientjob.yaml`). **Note:** Helm's CRD-in-templates handling is order-sensitive — for a fresh cluster, apply the CRD explicitly before relying on the chart.
+
+### P-025 — minikube clock skew made the risk ramp start already maxed
+After the host slept, minikube's clock jumped: pod ages read 6-7h though just created. The mock-predict ramp keys off `time.monotonic()` from process start, so it had already reached its 0.90 ceiling — the operator saw `risk=0.900` on the first poll and checkpointed instantly, giving a **flat** dashboard line with no visible climb across the threshold.
+**Fix:** `kubectl rollout restart deployment/argus-mock-predict` to reset the ramp clock **immediately before** applying the CR, so the reconcile loop polls a fresh 0.15→0.90 climb. Discovered while doing this that the operator **re-checkpoints every cycle** ("migration complete → back to Running") rather than freezing after the first — good for the metric time series (continuous checkpoint bars).
+
+### P-026 — operator needs AWS credentials on minikube (no IRSA off-EKS)
+The Helm chart's ServiceAccount carries the `eks.amazonaws.com/role-arn` IRSA annotation, which is a no-op outside EKS — so on minikube the operator's `boto3` S3/SQS calls have no credentials.
+**Fix (local demo only):** created an `aws-creds` Secret from the host's exported credentials and injected it with `kubectl set env deployment/argus-operator --from=secret/aws-creds`, applied **after** `helm install` so a later `helm upgrade` doesn't strip it. Kept the chart IRSA-clean (did **not** add static creds to the chart — they'd be wrong on EKS). Delete the secret at teardown.
+
+### ADR-008 — Self-contained annotation-scrape observability, built on minikube for the figure
+**Decision:** ship Prometheus + Grafana as plain manifests under `k8s/monitoring/` using **pod-annotation service discovery** (no `kube-prometheus-stack`, no ServiceMonitor CRD), with the datasource + dashboard **provisioned on startup**. Build and screenshot on **minikube** against the **real** operator writing to **real S3/SQS** (creds via P-026), not on EKS.
+**Why:** one `kubectl apply` brings up the whole stack on a bare cluster (no operator-of-operators to install first) — enough for a single scrape target and a poster figure. minikube keeps the "always `$0`" invariant while producing the exact dashboard that would run on EKS. CI (`deploy.yml`) was also guarded so the Helm deploy step is skipped when the cluster is torn down (build+push still runs) — the workflow previously would have gone red on every push to `main`.
+**Result:** dashboard **"Argus — Spot Resilience"** captured showing predicted risk climb → cross the 0.65 threshold → proactive-checkpoint bars firing at the crossing, with real `_FLUSH_TRIGGER` writes to S3 and risk events to SQS underneath.
