@@ -176,10 +176,14 @@ model can only learn to predict >1% price jumps, which correlate weakly with
 actual Spot interruptions. That's the ceiling on PR-AUC here — no amount of
 further tuning gets past it without better labels.
 
-**Not implemented:** lead-time and against-real-interruption evaluation. Both
-need real interruption timestamps (e.g. from NTH/EventBridge history) to mean
-anything; scoring lead-time against a price-spike proxy would just measure
-how early the model predicts price spikes, not interruptions.
+**Update:** proxy-label lead time is now measured (`ml/model/measure_lead_time.py`)
+— 9 true positives, mean/median 600s (10 min), range 300-900s (bounded by the
+label's own 3-step horizon). Used to replace the benchmark's placeholder
+`risk_lead_seconds` in `docs/objective2_result.md` with this real number. Still
+not against-real-interruption evaluation — that still needs real interruption
+timestamps (e.g. from NTH/EventBridge history) to mean anything; this measures
+how early the model predicts price spikes, not interruptions, which is a
+narrower, honestly-scoped claim.
 
 **Say in the paper:** *"the reactive path (Objective 1) is validated on real
 Spot infrastructure; the predictive model is trained, evaluated, and
