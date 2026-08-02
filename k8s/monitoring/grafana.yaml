@@ -1,0 +1,224 @@
+# Self-contained Grafana for the Argus demo, with the Prometheus datasource and
+# the Argus dashboard provisioned on startup (no manual clicking). Anonymous
+# admin is on so a demo/screenshot needs no login — do NOT expose this publicly.
+#
+#   kubectl apply -f k8s/monitoring/grafana.yaml
+#   kubectl -n monitoring port-forward svc/grafana 3000:3000
+#   open http://localhost:3000  ->  Dashboards -> "Argus — Spot Resilience"
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus.monitoring.svc:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: monitoring
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: argus
+        orgId: 1
+        folder: ""
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-argus
+  namespace: monitoring
+data:
+  argus.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "tags": ["argus", "spot"],
+      "title": "Argus — Spot Resilience",
+      "time": { "from": "now-10m", "to": "now" },
+      "refresh": "10s",
+      "templating": { "list": [] },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Predicted Interruption Risk  →  proactive checkpoint at 0.65",
+          "description": "The operator polls the model each interval and sets argus_risk_score. When risk crosses the 0.65 threshold (red line) it proactively checkpoints + migrates the job before the Spot interruption — see the checkpoint bars below light up at the same instant.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 11, "w": 17, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "argus_risk_score", "legendFormat": "{{instance_type}} / {{az}}", "refId": "A" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0, "max": 1, "unit": "none",
+              "custom": { "drawStyle": "line", "lineWidth": 3, "fillOpacity": 22, "pointSize": 6, "showPoints": "always", "gradientMode": "opacity", "lineInterpolation": "smooth" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 0.65 }
+                ]
+              },
+              "custom.thresholdsStyle": { "mode": "line+area" },
+              "color": { "mode": "thresholds" }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } }
+        },
+        {
+          "type": "stat",
+          "title": "Total Checkpoints",
+          "description": "Cumulative proactive checkpoints the operator has triggered (argus_checkpoints_total).",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 5, "w": 7, "x": 17, "y": 0 },
+          "targets": [ { "expr": "sum(argus_checkpoints_total)", "refId": "A" } ],
+          "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+          "options": { "colorMode": "value", "graphMode": "area", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "type": "stat",
+          "title": "Current Risk vs 0.65 Threshold",
+          "description": "Latest predicted interruption risk. Red = above the checkpoint threshold.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 7, "x": 17, "y": 5 },
+          "targets": [ { "expr": "max(argus_risk_score)", "refId": "A" } ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none", "min": 0, "max": 1, "decimals": 3,
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.65 } ] }
+            }
+          },
+          "options": { "colorMode": "background", "graphMode": "area", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Checkpoints Triggered (per-minute)",
+          "description": "Discrete proactive-checkpoint events. Bars appear once risk crosses the threshold above — the operator writes a _FLUSH_TRIGGER to S3 and publishes a risk event to SQS each cycle.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 11 },
+          "targets": [
+            { "expr": "increase(argus_checkpoints_total[1m])", "legendFormat": "{{job_name}}", "refId": "A" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "color": { "mode": "fixed", "fixedColor": "green" },
+              "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 80, "barAlignment": 0 }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Cumulative Checkpoints",
+          "description": "argus_checkpoints_total climbing over time — the running count of work saved from interruption.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 19 },
+          "targets": [
+            { "expr": "sum(argus_checkpoints_total)", "legendFormat": "total checkpoints", "refId": "A" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "color": { "mode": "fixed", "fixedColor": "blue" },
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 25, "gradientMode": "opacity", "lineInterpolation": "smooth", "showPoints": "never" }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } }
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: "Admin"
+            - name: GF_AUTH_DISABLE_LOGIN_FORM
+              value: "true"
+            - name: GF_USERS_DEFAULT_THEME
+              value: "light"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboard-argus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
