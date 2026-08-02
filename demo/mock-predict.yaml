@@ -1,0 +1,54 @@
+# Mock prediction service for the Phase-7 observability demo (minikube).
+# Reuses the operator image (it already ships fastapi/uvicorn + controller.mock_predict).
+# MOCK_RISK_MODE=ramp makes /predict climb 0.15 -> 0.90 over 120s, so the operator
+# sees risk cross the 0.65 threshold and fires a proactive checkpoint — the story
+# the Grafana dashboard captures. Swap the real predict-service in for a real run.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus-mock-predict
+  namespace: default
+  labels:
+    app: argus-mock-predict
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: argus-mock-predict
+  template:
+    metadata:
+      labels:
+        app: argus-mock-predict
+    spec:
+      containers:
+        - name: mock-predict
+          image: argus/operator:local
+          imagePullPolicy: Never
+          command: ["uvicorn", "controller.mock_predict:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: MOCK_RISK_MODE
+              value: "ramp"
+            - name: MOCK_RISK_START
+              value: "0.15"
+            - name: MOCK_RISK_END
+              value: "0.90"
+            - name: MOCK_RAMP_SECONDS
+              value: "120"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus-mock-predict
+  namespace: default
+  labels:
+    app: argus-mock-predict
+spec:
+  selector:
+    app: argus-mock-predict
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
