@@ -1,0 +1,7 @@
+{
+  "name": "reactive",
+  "checkpoint_mode": "reactive",
+  "step_budget": 200,
+  "notice_lead_seconds": 120,
+  "notice_trigger_file": "NOTICE"
+}

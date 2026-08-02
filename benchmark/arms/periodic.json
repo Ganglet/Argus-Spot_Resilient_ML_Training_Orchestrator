@@ -1,0 +1,6 @@
+{
+  "name": "periodic",
+  "checkpoint_mode": "periodic",
+  "checkpoint_interval_steps": 20,
+  "step_budget": 200
+}

@@ -18,6 +18,7 @@ import httpx
 import kopf
 
 from controller import scheduler, sqs_publisher
+from controller.metrics import checkpoint_count, risk_score_gauge, job_completion_count
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +95,21 @@ def reconcile(spec, name, namespace, status, patch, **kwargs):
     last_step = status.get("lastCheckpointStep", 0)
     instance_type = fallback_types[0]
 
-    if current_phase in ("Checkpointing", "Migrating"):
-        logger.info(f"[RECONCILE] '{name}' skipped — already in phase '{current_phase}'")
+    if current_phase in ("Checkpointing", "Migrating", "Succeeded"):
+        logger.info(f"[RECONCILE] '{name}' skipped â€” already in phase '{current_phase}'")
         return
+
+    # Check for job completion
+    try:
+        pods = scheduler.list_job_pods(name, namespace)
+        succeeded_pods = [p for p in pods if p.status.phase == "Succeeded"]
+        if succeeded_pods:
+            patch.status["phase"] = "Succeeded"
+            job_completion_count.labels(job_name=name).inc()
+            logger.info(f"[RECONCILE] '{name}' job completed successfully")
+            return
+    except Exception as e:
+        logger.warning(f"[RECONCILE] Failed to list pods for '{name}': {e}")
 
     # 1. Poll prediction service
     try:
@@ -113,6 +126,9 @@ def reconcile(spec, name, namespace, status, patch, **kwargs):
 
     risk_score = risk["risk_score"]
     patch.status["lastRiskScore"] = risk_score
+    
+    # Update prometheus gauge
+    risk_score_gauge.labels(job_name=name, instance_type=instance_type, az="eu-north-1a").set(risk_score)
 
     logger.info(
         f"[RECONCILE] '{name}' | risk={risk_score:.3f} threshold={risk_threshold} | phase={current_phase}"
@@ -128,6 +144,7 @@ def reconcile(spec, name, namespace, status, patch, **kwargs):
     try:
         trigger_s3_checkpoint(name, checkpoint_path)
         patch.status["lastCheckpointStep"] = last_step + 1
+        checkpoint_count.labels(job_name=name).inc()
     except Exception as e:
         logger.error(f"[RECONCILE] '{name}' checkpoint trigger failed: {e}")
         patch.status["phase"] = "Failed"

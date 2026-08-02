@@ -13,14 +13,17 @@ import kopf
 
 # kopf discovers handlers by import — importing handlers registers them
 import controller.handlers  # noqa: F401
+from controller.metrics import start_metrics_server
 
 
 def main():
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+        format="%(asctime)s %(levelname)s %(name)s â€” %(message)s",
         stream=sys.stdout,
     )
+    # Start Prometheus metrics server
+    start_metrics_server()
     kopf.run(clusterwide=True)
 
 

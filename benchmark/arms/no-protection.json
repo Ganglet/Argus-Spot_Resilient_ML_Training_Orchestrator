@@ -1,0 +1,5 @@
+{
+  "name": "no-protection",
+  "checkpoint_mode": "none",
+  "step_budget": 200
+}

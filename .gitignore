@@ -24,9 +24,13 @@ credentials
 *.pt
 *.pth
 *.ckpt
+*.joblib
+ml/model/model_metadata.json
+ml/model/multi_seed_results.json
 mlruns/
 ml/data/*.csv
 ml/data/*.png
+ml/data/labels/
 
 # Misc
 .DS_Store
@@ -38,7 +42,16 @@ ml/data/*.png
 *.tar
 *.tar.gz
 *.zip
+
+# Executables and Binaries
+*.exe
+minikube.exe
 terraform.exe
 
 .terraform.tfstate.lock.info
 .terraform/
+
+# Benchmark (Track 2) — cached dataset + raw per-run trial data are large/transient;
+# summary_*.csv and figures/ (the actual deliverable) stay tracked.
+benchmark/data/
+benchmark/results/raw/
