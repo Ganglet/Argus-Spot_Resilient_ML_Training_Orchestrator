@@ -42,11 +42,28 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
+      # The cluster is normally torn down to $0 between sessions (see
+      # docs/problems_and_decisions.md — the $66 lesson). Deploying against a
+      # non-existent cluster would fail the whole run, so gate the deploy on the
+      # cluster actually being up. Build+push above always runs; deploy is
+      # best-effort.
+      - name: Check EKS cluster exists
+        id: cluster
+        run: |
+          if aws eks describe-cluster --name "$EKS_CLUSTER" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::EKS cluster '$EKS_CLUSTER' not found — skipping Helm deploy (cluster torn down). Image was still built and pushed."
+          fi
+
       - name: Update kubeconfig for EKS
+        if: steps.cluster.outputs.exists == 'true'
         run: |
           aws eks update-kubeconfig --name $EKS_CLUSTER --region $AWS_REGION
 
       - name: Deploy via Helm
+        if: steps.cluster.outputs.exists == 'true'
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
