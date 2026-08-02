@@ -92,7 +92,7 @@ def ensemble_eval(checkpoints_dir: str):
             print(f"Best F1: {f1s[best_idx]:.4f} (precision {precisions[best_idx]:.4f}, recall {recalls[best_idx]:.4f})")
             cm = confusion_matrix(labels, (probs >= thresholds[best_idx]).astype(int))
             print(f"TN {cm[0][0]} FP {cm[0][1]} FN {cm[1][0]} TP {cm[1][1]}")
-        return {"pr_auc": pr_auc, "brier": brier, "lift": pr_auc / base_rate}
+        return {"pr_auc": float(pr_auc), "brier": float(brier), "lift": float(pr_auc / base_rate)}
 
     print(f"\n{'='*55}\nENSEMBLE ({len(seed_dirs)} seeds averaged) - held-out test set\n{'='*55}")
     result = report("Ensemble (calibrated)", test_labels, ensemble_test_calibrated)
