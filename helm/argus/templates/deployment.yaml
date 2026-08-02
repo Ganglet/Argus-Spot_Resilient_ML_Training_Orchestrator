@@ -12,6 +12,10 @@ spec:
     metadata:
       labels:
         app: {{ .Release.Name }}-operator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.metrics.port }}"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       containers:
@@ -19,7 +23,12 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["python", "-m", "controller.main"]
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
           env:
+            - name: METRICS_PORT
+              value: "{{ .Values.metrics.port }}"
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.aws.region }}
             - name: CHECKPOINT_BUCKET
