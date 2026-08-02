@@ -13,12 +13,16 @@ class SpotPriceDataset(Dataset):
     to train our PyTorch Transformer.
     """
     def __init__(self, csv_file_path: str, seq_length: int = SEQ_LENGTH,
-                 prediction_horizon: int = PREDICTION_HORIZON, scaler: StandardScaler = None):
+                 prediction_horizon: int = PREDICTION_HORIZON, scaler: StandardScaler = None,
+                 spike_threshold: float = 1.01):
         """
         seq_length: e.g., 24 timesteps * 5 mins = 2 hours of history
-        prediction_horizon: predict if an interruption occurs in the next 3 timesteps (15 mins)
+        prediction_horizon: predict if an interruption occurs in the next N timesteps
         scaler: a pre-fit StandardScaler to reuse (e.g. for the val split). If None, a new
             one is fit on this data and kept on self.scaler so callers can persist it.
+        spike_threshold: price_t > price_{t-1} * spike_threshold counts as a proxy
+            "interruption". Default 1.01 (>1% jump) was never tuned - exposed here so
+            tune_data_config.py can sweep it instead of it being a hardcoded guess.
         """
         self.seq_length = seq_length
         self.prediction_horizon = prediction_horizon
@@ -33,7 +37,7 @@ class SpotPriceDataset(Dataset):
         # Ground truth labels don't explicitly exist in the raw Spot API feed.
         # Spikes in price (e.g. > 1% suddenly) serve as our proxy label for Spot interruptions.
         df['prev_price'] = df.groupby(["instance_type", "availability_zone"])['spot_price'].shift(1)
-        df['is_spike'] = (df['spot_price'] > df['prev_price'] * 1.01).astype(int)
+        df['is_spike'] = (df['spot_price'] > df['prev_price'] * spike_threshold).astype(int)
 
         # Fit ONE global scaler across every instance/AZ, not a throwaway one per group.
         # A per-group scaler can never be reused at serving time (which instance's scaler
@@ -136,18 +140,37 @@ def val_calibration_test_split(group_ranges, train_split: float = 0.8, purge: in
         test_indices.extend(range(min(calib_cut + purge, end), end))
     return calib_indices, test_indices
 
-def create_dataloaders(csv_path: str, batch_size: int = 64, train_split: float = 0.8):
+def create_dataloaders(csv_path: str, batch_size: int = 64, train_split: float = 0.8,
+                        prediction_horizon: int = PREDICTION_HORIZON, spike_threshold: float = 1.01,
+                        oversample: bool = False):
     """
     Creates PyTorch DataLoaders to continuously stream our CSV into the Transformer.
+
+    oversample: if True, the train loader draws positive-labeled windows roughly as
+        often as negative ones (WeightedRandomSampler) instead of relying on Focal
+        Loss alone to compensate for the ~0.08% positive rate. Only applied to train -
+        val/calibration/test stay at the natural class distribution, since oversampling
+        those would make the reported metrics no longer reflect real-world deployment.
     """
-    dataset = SpotPriceDataset(csv_file_path=csv_path, seq_length=SEQ_LENGTH)
+    dataset = SpotPriceDataset(csv_file_path=csv_path, seq_length=SEQ_LENGTH,
+                                prediction_horizon=prediction_horizon, spike_threshold=spike_threshold)
 
     train_indices, val_indices = temporal_split_indices(dataset.group_ranges, train_split)
 
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    if oversample:
+        train_labels = dataset.labels[train_indices]
+        pos_frac = train_labels.mean()
+        # weight each sample inversely to its class frequency, so pos/neg are drawn
+        # roughly equally often over an epoch (same idea as WeightedRandomSampler's
+        # standard "balance the classes" recipe)
+        weights = np.where(train_labels == 1, 1.0 / max(pos_frac, 1e-6), 1.0 / max(1 - pos_frac, 1e-6))
+        sampler = torch.utils.data.WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, drop_last=True)
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # dataset.scaler is fit on the full data and must be persisted by the caller (train.py)
