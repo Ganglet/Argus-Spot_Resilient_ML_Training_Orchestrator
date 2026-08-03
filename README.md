@@ -1,279 +1,204 @@
 # Argus — Spot-Resilient ML Training Orchestrator
 
-A three-layer system that predicts EC2 Spot interruptions before they happen and automatically checkpoints + migrates running ML training jobs — zero human intervention.
+A three-layer system that predicts EC2 Spot interruptions before they happen and automatically checkpoints + migrates running ML training jobs — zero human intervention. **Validated end-to-end on real AWS EKS.**
 
-```
-EC2 Spot Price History
-        │
-        ▼
-  Lambda (every 5 min)
-        │  writes CSVs
-        ▼
-  S3 Feature Store ──► ML Model (Person B) ──► FastAPI /predict
-                                                        │
-                                          Kubernetes Operator (Person A)
-                                                        │
-                              ┌─────────────────────────┼──────────────────────┐
-                              ▼                         ▼                      ▼
-                    Flush Checkpoint to S3     Cordon Risky Node     Reschedule Pod
-```
+> **Status: complete (Weeks 1–8).** Live-EKS interruption survival captured, a controlled benchmark quantifies when prediction pays, the risk model is trained/calibrated/characterized, and the whole loop is observable in Grafana. Targeting a NeurIPS ML4Sys 2026 workshop poster.
 
 ---
 
-## Ownership
+## Architecture
 
-| Layer | Owner | Status |
-|-------|-------|--------|
-| AWS Infrastructure (VPC, S3, SQS, IAM) | Person A | ✅ Live in AWS |
-| Lambda price collector + EventBridge cron | Person A | ✅ Live in AWS — writing CSVs every 5 min |
-| EKS Cluster + IRSA + ECR | Person A | ✅ Control plane live, IRSA verified, ECR repos ready |
-| Kubernetes Operator (CRD + kopf + reconcile loop) | Person A | ✅ Full reconcile loop — integration test passed |
-| ML feature pipeline + EDA | Person B | ✅ Complete locally |
-| Transformer model (trained) | Person B | ✅ Trained locally, artifacts in S3 |
-| FastAPI prediction service | Person B | ✅ Complete — MOCK_MODE for local dev |
-| CIFAR-10 training job (checkpoint/resume) | Person B | ✅ Complete — S3 trigger polling, SIGTERM handler |
-| End-to-end integration (Minikube) | Both | ✅ Passed — Week 5 complete |
-| EKS deployment + live migration (real EKS, IRSA) | Both | ✅ Validated on real EKS (2026-07-28) — On-Demand nodes; real Spot deferred (Free-Tier account, ADR-005) |
+```mermaid
+flowchart TB
+    subgraph L1["Prediction Layer &mdash; Person B"]
+        SP["EC2 Spot price history"] --> LAM["Lambda price collector<br/>(every 5 min)"]
+        LAM --> FS[("S3 feature store")]
+        FS --> TF["Transformer<br/>SpotInterruptionPredictor"]
+        TF --> API["FastAPI /predict<br/>risk score 0&ndash;1"]
+    end
+
+    subgraph L2["Orchestration Layer &mdash; Person A"]
+        OP["kopf operator<br/>reconcile loop"]
+        DEC{"risk &gt; 0.65?"}
+        OP --> DEC
+        DEC -->|"yes"| ACT["Flush checkpoint to S3<br/>+ cordon node + reschedule<br/>+ publish SQS risk event"]
+    end
+
+    subgraph L3["Training Layer"]
+        POD["CIFAR-10 training pod"]
+        CKPT[("S3 checkpoints<br/>latest_checkpoint.pt")]
+        POD -->|"poll _FLUSH_TRIGGER<br/>every 100 batches"| CKPT
+        CKPT -->|"resume from epoch N"| POD
+    end
+
+    subgraph OBS["Observability &mdash; Phase 7"]
+        PROM["Prometheus"] --> GRAF["Grafana<br/>risk &rarr; checkpoint dashboard"]
+    end
+
+    API -->|"poll each interval"| OP
+    ACT --> POD
+    ACT --> CKPT
+    NTH["AWS Node Termination Handler<br/>real 2-min Spot warning &mdash; Objective 1"] -->|"drain &rarr; SIGTERM"| POD
+    OP -.->|"argus_risk_score<br/>argus_checkpoints_total"| PROM
+
+    style L1 fill:#e3f2fd,stroke:#1976d2
+    style L2 fill:#fff3e0,stroke:#f57c00
+    style L3 fill:#e8f5e9,stroke:#388e3c
+    style OBS fill:#f3e5f5,stroke:#7b1fa2
+    style NTH fill:#ffebee,stroke:#c62828
+```
+
+**Two interruption paths converge on the same SIGTERM → checkpoint → reschedule → resume flow:** the *predictive* path (operator sees risk cross the threshold and pre-migrates) and the *reactive* path (AWS's real 2-minute Spot warning via the Node Termination Handler — validated on real EKS in Objective 1).
 
 ---
 
-## Repository Structure
+## The problem
 
-```
-argus/
-├── terraform/                  # All AWS infrastructure — Person A owns this
-│   ├── main.tf                 # Provider, billing alarm, VPC, subnets
-│   ├── s3.tf                   # Checkpoint bucket + feature store bucket
-│   ├── sqs.tf                  # Risk events queue + DLQ
-│   ├── iam.tf                  # Lambda role + operator role (IRSA placeholder)
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── terraform.tfvars.example
-│
-├── lambda/
-│   └── price_collector/
-│       ├── handler.py          # Pulls Spot price history → writes CSV to S3
-│       └── requirements.txt
-│
-├── localstack/                 # Local AWS simulator — use this for all dev (free)
-│   ├── docker-compose.yml
-│   └── init/
-│       └── 01_create_buckets.sh
-│
-├── operator/                   # Kubernetes Operator — Person A (Week 4–5)
-├── ml/                         # ML model + FastAPI — Person B
-├── helm/                       # Helm chart for EKS deployment (Week 6)
-├── demo/                       # CIFAR-10 training job + SpotResilientJob manifest
-├── monitoring/                 # Grafana dashboards
-├── .github/workflows/          # CI/CD
-└── docs/
-    └── contracts.md            # ← READ THIS FIRST (Person B)
-```
+EC2 Spot instances are ~70–90% cheaper than On-Demand but can be reclaimed on **2 minutes' notice**. A long ML training job that ignores this loses everything since its last checkpoint on every interruption — wasted GPU-hours and a non-deterministic finish time. Argus keeps the job alive across reclaims automatically.
+
+## How it works
+
+| Layer | What it does |
+|-------|--------------|
+| **1. Prediction** (Person B) | Lambda pulls Spot price history every 5 min → S3 feature store → a Transformer scores interruption risk → served via FastAPI `/predict`. |
+| **2. Orchestration** (Person A) | A `kopf` Kubernetes operator (the `SpotResilientJob` CRD) polls `/predict`; when risk crosses `0.65` it writes a `_FLUSH_TRIGGER` to S3, cordons the node, reschedules the pod, and publishes an SQS risk event. |
+| **3. Training** | The CIFAR-10 job polls the trigger every 100 batches and saves `model.pt`; a SIGTERM handler checkpoints on drain; the replacement pod resumes from the last epoch. |
+
+The checkpoint mechanism is deliberately **decoupled** — the operator only *signals*; the training pod owns the flush — so the operator never touches training-process internals.
 
 ---
 
-## For Person B — Read This First
+## Results
 
-Before writing any model or API code, read [docs/contracts.md](docs/contracts.md). It defines:
+### Objective 1 — Survived a real Spot drain on real EKS
 
-- The exact JSON shape your `/predict` endpoint must return
-- Every field in the `SpotResilientJob` CRD
-- The S3 checkpoint path format your training job writes to
-- The SQS message schema
-- ECR repo names and Docker image tags
+Validated on **real Spot nodes** (`c5.xlarge`/`m5.xlarge`) with IRSA (zero static credentials) and the AWS Node Termination Handler in queue mode. Training was live at **epoch 7** when the interruption fired:
 
-**Nothing should be built until both people have agreed on these contracts.**
+| t (UTC) | Event |
+|---------|-------|
+| 12:26:18 | NTH receives `EC2 Spot Instance Interruption Warning` |
+| 12:26:19 | Requesting drain → evicting pod `cifar10-test` (graceful SIGTERM) |
+| 12:26:19 | SIGTERM handler **writes checkpoint (epoch 8) to S3** |
+| 12:26:25 | Node cordoned + drained — **10 s** end-to-end |
+| +~75 s | Replacement pod on a healthy node → **"Resuming from epoch 8"** |
+
+Only the in-progress epoch's work was lost. The real checkpoint written to S3 during the drain:
+
+![Real checkpoint persisted to S3 during interruption survival](docs/Figures/real_s3_checkpoint.png)
+
+> **Honest scope:** the interruption was delivered by injecting a **schema-conformant** `EC2 Spot Instance Interruption Warning` into NTH's queue — NTH cannot distinguish it from a real reclaim, so the drain → SIGTERM → checkpoint → resume path is genuinely exercised. A *forced* AWS reclaim (FIS `send-spot-instance-interruptions`) is future work, blocked on an account-subscription issue, not the design. See [`docs/objective1_result.md`](docs/objective1_result.md) and ADR-007 / P-019 in [`docs/problems_and_decisions.md`](docs/problems_and_decisions.md).
+
+### Objective 2 — When does prediction actually pay?
+
+A controlled benchmark (4 arms × 4 interruption rates × 5 reps = **80 trials**, Poisson-scheduled kills). Wasted compute at the fastest rate (MTBF = 120 s):
+
+| Arm | Wasted compute (s) | Recovery (s) |
+|-----|-------------------:|-------------:|
+| no-protection | 202.3 | — |
+| reactive-on-notice | 169.4 | 58.8 |
+| periodic | 4.3 | 65.7 |
+| **predictive (Argus)** | **0.0** | **5.4** |
+
+The argument the paper rides on: **reactive's fixed 2-minute notice stops helping exactly when interruptions come faster than once per ~2 min** (at 120 s MTBF the notice ≈ the interval, so reactive degrades toward no-protection). Predictive's clean wins are **zero wasted compute** and **~12× faster recovery** (5.4 s vs 65.7 s). Honestly noted: *periodic* checkpointing is a strong ML-free baseline on wasted compute, and predictive's zero relies on an assumed lead time — see the write-up. Full table + figures: [`docs/objective2_result.md`](docs/objective2_result.md), [`benchmark/results/`](benchmark/results/).
+
+### Objective 3 — The risk model (honest secondary result)
+
+Transformer on live `eu-north-1` Spot price history. After fixing the bugs that made it useless (train/serve scaler skew — the original flat `0.0419`; train/val leakage; a no-op FocalLoss `alpha`; missing calibration): **14.68× base-rate lift, 5-seed mean, 95% CI ≈ [9.9×, 19.5×]** — on a **proxy label** (price spikes), not real reclaims. Presented as an **advisory** signal; the ceiling is label quality, and real interruption ground truth is future work. Details: [`docs/objective3_result.md`](docs/objective3_result.md).
+
+### Observability
+
+The operator emits Prometheus metrics (`argus_risk_score`, `argus_checkpoints_total`, `argus_jobs_completed_total`); a provisioned Grafana dashboard shows predicted risk climbing across the `0.65` threshold and the proactive checkpoint firing at that instant:
+
+![Argus Grafana dashboard — risk climbs, crosses 0.65, checkpoints fire](docs/Figures/grafana_dashboard.png)
+
+Run it: `./scripts/monitoring.sh up` → `./scripts/monitoring.sh open`. See [`docs/A6_observability.md`](docs/A6_observability.md).
 
 ---
 
-## What's Live in AWS (Weeks 1–3)
+## Honest limitations
 
-All resources are in `eu-north-1` (Stockholm). Provisioned via Terraform — do not create or modify these manually in the console.
+- **Objective 1** used an *injected* (schema-conformant) reclaim, not an AWS-issued FIS reclaim.
+- **Objective 2** predictive's zero-waste assumes ~5 min reliable lead time — a benchmark parameter, not a measured property of the trained model; the training job is synthetic (mechanics, not SOTA accuracy).
+- **Objective 3** is measured on a proxy label (price spikes), so the model is advisory, not automation-grade.
+- Real Spot on the primary account was gated by a Free-Tier restriction for most of the build (ADR-005), so Week-6 nodes were On-Demand.
 
-| Resource | Name | Purpose |
-|----------|------|---------|
-| VPC | `argus-vpc` | Isolated network, 2 AZs |
-| S3 | `argus-checkpoints-844641713781` | Model checkpoint storage (versioned) |
-| S3 | `argus-feature-store-844641713781` | Spot price CSV pipeline output |
-| SQS | `argus-risk-events` | Risk alert event bus |
-| SQS | `argus-risk-events-dlq` | Dead-letter queue for failed messages |
-| IAM Role | `argus-lambda-price-collector` | Lambda AWS permissions |
-| Lambda | `argus-price-collector` | Fetches Spot prices every 5 min → S3 |
-| EventBridge | `argus-5min-cron` | Triggers Lambda on schedule |
-| CloudWatch Logs | `/aws/lambda/argus-price-collector` | Lambda execution logs (7 day retention) |
-| Budget | `argus-dev-budget` | $20/month alarm |
-| EKS Cluster | `argus-eks` | K8s control plane — live for IRSA (node groups destroyed, recreated Week 6) |
-| IAM OIDC Provider | — | Registers EKS OIDC endpoint with AWS IAM — required for IRSA |
-| IAM Role | `argus-operator-irsa` | IRSA role pods assume — scoped to `default/argus-operator` ServiceAccount |
-| ECR | `argus/operator` | Operator image registry |
-| ECR | `argus/predict-service` | FastAPI prediction service image registry |
-| ECR | `argus/training-job` | CIFAR-10 training job image registry |
-
-**Person B needs:**
-- The feature store bucket name: `argus-feature-store-844641713781`
-- The checkpoint bucket name: `argus-checkpoints-844641713781`
-
-Your ML pipeline reads raw Spot price CSVs from:
-```
-s3://argus-feature-store-844641713781/raw/YYYY/MM/DD/HH/prices_*.csv
-```
+Owning these is the point — see the framing in [`docs/poster_blueprint.md`](docs/poster_blueprint.md).
 
 ---
 
-## Local Development Setup
+## Repository structure
 
-Use LocalStack for all development. Do not touch real AWS until Week 6.
+```
+Project/
+├── terraform/          # All AWS infra (VPC, S3, SQS, IAM, EKS, IRSA, ECR)
+├── lambda/             # Spot price collector (EventBridge cron → S3)
+├── operator/           # kopf Kubernetes operator + SpotResilientJob CRD
+├── ml/                 # Transformer model, FastAPI predict service, CIFAR-10 job, label pull
+├── benchmark/          # Objective 2 harness, arms, results, figures
+├── helm/argus/         # Helm chart (operator + metrics Service)
+├── k8s/monitoring/     # Prometheus + Grafana (Phase 7)
+├── demo/               # SpotResilientJob + training-pod + mock-predict manifests
+├── scripts/            # objective1_real_spot.sh, monitoring.sh, verify_teardown.sh
+├── localstack/         # Local AWS simulator for offline dev
+├── .github/workflows/  # CI/CD (build always; deploy gated on cluster existing)
+└── docs/               # Objective results, decisions log, ADRs, poster blueprint, figures
+```
 
-### Prerequisites
+## Reproduce
 
 ```bash
-# Required
-brew install awscli terraform docker
-brew install --cask docker        # Docker Desktop
+# --- Local dev (offline, free) ---
+cd localstack && docker compose up -d          # LocalStack S3/SQS
+bash minikube/setup.sh                          # CRD + RBAC on minikube
 
-# Python (for Lambda + operator dev)
-python3 -m venv .venv
-source .venv/bin/activate
-pip install boto3
+# --- Benchmark (Objective 2, no cloud needed) ---
+python benchmark/harness.py --reps 5 --step-budget 500 --step-time-sec 0.3
+python benchmark/aggregate.py                   # -> benchmark/results/
+
+# --- Observability stack (minikube) ---
+helm upgrade --install argus ./helm/argus --namespace default
+./scripts/monitoring.sh up && ./scripts/monitoring.sh open
+
+# --- Real EKS interruption drill (Objective 1) ---
+./scripts/objective1_real_spot.sh spot-up       # Spot node group + IRSA re-wire
+./scripts/objective1_real_spot.sh nth-queue     # Node Termination Handler
+./scripts/objective1_real_spot.sh inject        # schema-conformant interruption
+./scripts/objective1_real_spot.sh evidence
 ```
 
-### Start LocalStack
+## Cost safety
+
+The primary account has spotty billing guardrails, so **every session ends with a sweep**:
 
 ```bash
-cd localstack/
-docker compose up -d
-
-# Verify — should show both argus buckets and both queues
-aws --endpoint-url http://localhost:4566 s3 ls
-aws --endpoint-url http://localhost:4566 sqs list-queues
+./scripts/verify_teardown.sh    # all-region check for anything billable; exit 0 = clean
 ```
 
-### Point boto3 at LocalStack
-
-In any script during local dev, add:
-```python
-import boto3
-
-# Local dev
-s3 = boto3.client("s3", endpoint_url="http://localhost:4566",
-                  aws_access_key_id="test", aws_secret_access_key="test",
-                  region_name="eu-north-1")
-
-# Real AWS (Week 6+) — just remove endpoint_url
-s3 = boto3.client("s3", region_name="eu-north-1")
-```
+Born from a \$66 EKS cluster left running unnoticed. EKS/NAT are hourly billers — always tear them down; S3/SQS/Lambda are effectively free and stay up.
 
 ---
 
-## Terraform (Person A workflow)
-
-```bash
-cd terraform/
-
-# First time only
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars — add your email for billing alarm
-
-terraform init
-terraform plan    # preview changes
-terraform apply   # create resources
-
-# See all live resource IDs and names
-terraform output
-```
-
-> **Never run `terraform apply` without reviewing `terraform plan` first.**
-> EKS and NAT Gateway are intentionally excluded until Week 6 — adding them starts the billing clock.
-
----
-
-## Integration Contracts (Summary)
-
-Full details in [docs/contracts.md](docs/contracts.md).
-
-**FastAPI endpoint (Person B builds, Person A calls):**
-```
-POST /predict
-{
-  "instance_type": "m5.xlarge",
-  "az": "eu-north-1a"
-}
-→ { "instance_type": "m5.xlarge", "az": "eu-north-1a", "risk_score": 0.82, "timestamp": "..." }
-
-GET /predict?instance_type=m5.xlarge&az=eu-north-1a
-→ { "instance_type": "m5.xlarge", "az": "eu-north-1a", "risk_score": 0.82, "timestamp": "..." }
-
-GET /health
-→ { "status": "ok" }
-```
-
-**S3 checkpoint path (Person B writes, Person A triggers flush):**
-```
-s3://argus-checkpoints-844641713781/checkpoints/{job-name}/{step}/model.pt
-```
-
-**Custom Kubernetes resource (both use):**
-```yaml
-apiVersion: argus.io/v1
-kind: SpotResilientJob
-spec:
-  image: pytorch/pytorch:2.1
-  command: [python, train.py]
-  checkpointPath: s3://argus-checkpoints-844641713781/checkpoints/my-job
-  riskThreshold: 0.65
-  instanceFallback: [m5.large, c5.xlarge]
-```
-
----
-
-## Git & Repository Best Practices
-
-To maintain repository health, size, and security, we strictly enforce the following rules regarding untracked files and git blob storage:
-
-**1. No Large Binary Files (`*.pt`, `*.pth`, `*.ckpt`)**
-- Why: Git is a version control system for *source code*, not a blob storage system for large model artifacts. Committing a 5MB+ PyTorch model (`spot_transformer.pt`) every time you train bloats the `.git` folder indefinitely because Git stores a full snapshot of every binary change forever.
-- Standard Practice: Model checkpoints must be saved locally to `ml/model/mlruns/` (which is git-ignored) and pushed to remote Cloud Storage (S3 `argus-checkpoints-...` or a remote MLflow registry) for versioning.
-
-**2. No Raw Datasets (`*.csv`, `*.json`)**
-- Why: Datasets change constantly and can become massive (GBs in scale). Committing `raw_spot_prices.csv` or `features.csv` creates enormous Git history files and violates the principle of data isolation.
-- Standard Practice: Scripts natively pull data from the S3 feature store bucket seamlessly. Code should *never* contain the data it runs on.
-
-**3. No Auto-Generated Assets (`*.png`, `*.db`)**
-- Why: Explanatory graphs (`eda_price_series.png`) or local MLflow databases (`mlruns.db`) are dynamically generated every time the script is executed. Tracking these causes perpetual merge conflicts between developers doing their own local testing.
-- Standard Practice: If graphs are needed for documentation, they should ideally be hosted externally or only committed to an exclusive `/docs/images` folder.
-
-**4. No Cloud Provider Binaries / Configs (`.terraform/`, `terraform.exe`, `*.zip`)**
-- Why: Committing Terraform state folders, provider binaries, or packaged lambda zips (`price_collector.zip`) breaks cross-platform compatibility (e.g. tracking a Windows `terraform.exe` binary will break for a Mac user cloning the repo).
-- Standard Practice: Every developer must `terraform init` their own providers locally.
-
-*Note: The `.gitignore` at the root of the repository explicitly filters these extensions. Ensure you do not use `git add -f` to forcibly track ignored entities.*
-
----
-
-## Cost Management
-
-| Phase | Real AWS used | Expected cost |
-|-------|--------------|---------------|
-| Week 1–5 | S3 + SQS + IAM + Lambda | ~$0 (free tier) |
-| Week 6–8 | + EKS + NAT Gateway | ~$5–15 total |
-
-**Rules:**
-- Use LocalStack for all dev until Week 6
-- Run `terraform destroy -target=aws_eks_cluster.main -target=aws_nat_gateway.nat` after every EKS session
-- EKS control plane costs $0.10/hr even with zero pods running
-- A $20/month billing alarm is active — you'll get emailed at $16
-
----
-
-## Week-by-Week Roadmap
+## Roadmap — all complete
 
 | Week | Person A (Infra / Operator) | Person B (ML / API) |
 |------|-----------------------------|---------------------|
-| **1** | ✅ **Completed:** Terraform base infra — VPC, S3, SQS, IAM live in AWS. | ✅ **Completed:** Spot price history pull, initial EDA. |
-| **2** | ✅ **Completed:** Lambda price collector + EventBridge cron live — CSVs flowing into S3 every 5 min. EKS code written (`eks.tf`), deployment deferred to Week 6. | ✅ **Completed:** Feature pipeline, PyTorch Dataset + DataLoader, first training run. |
-| **3** | ✅ **Completed:** EKS control plane live (`argus-eks`). IRSA wired — pods assume `argus-operator-irsa` role via OIDC, smoke-tested with zero hardcoded credentials. ECR repos created for all 3 images. | ✅ **Completed:** Transformer trained, Focal Loss, MLflow tracking, hyperparameter tuning. |
-| **4** | ✅ **Completed:** `SpotResilientJob` CRD live on Minikube. kopf operator running — `on_create`, `on_update`, `on_delete`, and 60s `reconcile` timer all verified. | ✅ **Completed:** FastAPI `/predict` service, Dockerfile, push to ECR. |
-| **5** | ✅ **Completed:** Full reconcile loop — risk polling, `_FLUSH_TRIGGER` S3 marker, cordon + reschedule, SQS publish. Integration test passed on Minikube. | ✅ **Completed:** CIFAR-10 training job with S3 checkpoint/resume, SIGTERM handler, `_FLUSH_TRIGGER` polling, MOCK_MODE for local dev. |
-| **6** | ✅ **Completed:** Deployed to **real EKS** — Helm-installed operator (amd64), IRSA verified (zero static creds). Live migration chain validated end-to-end: risk poll → `_FLUSH_TRIGGER` to real S3 → SQS event → cordon → reschedule to a healthy node (~112 ms). Torn down to $0 after. *Nodes are On-Demand `m7i-flex.large` — account is Free-Tier-restricted, so real Spot is deferred (interruption simulated via cordon; see ADR-005 / P-013).* | ✅ **Completed:** Real model + real predict-service on EKS, real checkpoint written to S3 via IRSA, resume-from-checkpoint validated. **Flat-0.0419 bug fixed** (train/serve scaling mismatch + FocalLoss + leakage bugs) — model now shows a real, 5-seed-confirmed signal: 14.68x lift over random base rate (see [docs/objective3_result.md](docs/objective3_result.md)). **Benchmark table vs reactive baseline complete** — full 4-arm x 4-rate x 5-rep sweep; predictive checkpointing eliminates wasted compute at every tested interruption rate (see [docs/objective2_result.md](docs/objective2_result.md)). |
-| **7** | ⏳ **Pending:** Prometheus + Grafana, GitHub Actions CI/CD. | ⏳ **Pending:** PR curves, evaluation report. |
-| **8** | ⏳ **Pending:** ADRs, cost analysis, README polish. | ⏳ **Pending:** System paper, demo video. |
+| **1–3** | ✅ Terraform infra (VPC, S3, SQS, IAM), Lambda price collector, EKS control plane + IRSA + ECR | ✅ Spot data + EDA, feature pipeline, Transformer trained (Focal Loss, MLflow, tuning) |
+| **4–5** | ✅ `SpotResilientJob` CRD + kopf operator, full reconcile loop, Minikube integration test passed | ✅ FastAPI `/predict`, CIFAR-10 job with S3 checkpoint/resume + SIGTERM handler |
+| **6** | ✅ Deployed to **real EKS** — Helm operator, IRSA, live migration chain end-to-end, torn down to \$0 | ✅ Real model + predict-service on EKS, real checkpoint to S3, resume validated |
+| **7** | ✅ Prometheus + Grafana observability, CI/CD guarded | ✅ Metrics instrumented in the reconcile loop |
+| **8** | ✅ Objective 1 (real-EKS survival), README + architecture diagram, poster blueprint | ✅ Objective 2 (benchmark), Objective 3 (model characterized, 14.7× proxy lift) |
+
+## Authors
+
+- **Person A** — cloud/infrastructure: Terraform, EKS, the Kubernetes operator, CI/CD, observability, real-Spot interruption drill.
+- **Person B** — machine learning: feature pipeline, the Transformer risk model, FastAPI predict service, CIFAR-10 training job, benchmark harness.
+
+## Documentation index
+
+- [`docs/objective1_result.md`](docs/objective1_result.md) — real-EKS interruption survival
+- [`docs/objective2_result.md`](docs/objective2_result.md) — benchmark harness + full sweep
+- [`docs/objective3_result.md`](docs/objective3_result.md) — prediction model, 4 rounds
+- [`docs/A6_observability.md`](docs/A6_observability.md) — Prometheus + Grafana
+- [`docs/problems_and_decisions.md`](docs/problems_and_decisions.md) — every problem (P-0xx) + ADRs
+- [`docs/poster_blueprint.md`](docs/poster_blueprint.md) — the 4-page poster plan
+- [`docs/contracts.md`](docs/contracts.md) — the A↔B integration contracts
