@@ -166,7 +166,8 @@ def run_trial(arm, rate_seconds, rep, results_root, step_budget, step_time_sec, 
         return spawn_job(run_dir, arm_config_path, step_budget, step_time_sec, synthetic)
 
     rng = random.Random(seed)
-    log_event(harness_path, "run_meta", arm=arm["name"], rate_seconds=rate_seconds, rep=rep, step_budget=step_budget)
+    log_event(harness_path, "run_meta", arm=arm["name"], rate_seconds=rate_seconds, rep=rep,
+              step_budget=step_budget, step_time_sec=step_time_sec)
 
     run_start = time.time()
     max_deadline = run_start + step_budget * step_time_sec * max_wallclock_multiplier
