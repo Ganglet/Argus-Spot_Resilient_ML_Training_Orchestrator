@@ -5,15 +5,17 @@ pipeline output (`ml/data/features.csv`, 386,868 windowed sequences from live
 `eu-north-1` Spot price history). Reproduce with `python ml/model/train.py`
 then `python ml/model/calibrate_and_finalize.py`.
 
-This went through four rounds: Round 1 fixed the bugs that made the model
+This went through five rounds: Round 1 fixed the bugs that made the model
 useless (flat output). Round 2 fixed methodology problems that were making
 the *measurement* of the model optimistic/pessimistic in different ways, and
 tried a few concrete improvements. Round 3 tried a real (non-proxy) feature
 and, in the process, surfaced just how much run-to-run variance there is.
 Round 4 quantified that variance properly with a 5-seed sweep — **that's the
-number that should actually be cited**, not any single run above. All four
-are recorded below because the reasoning matters for anyone touching this
-code next.
+number that should actually be cited**, not any single run above. Round 5
+tried four more concrete levers (ensembling, label threshold, prediction
+horizon, oversampling) to push past that number — none of them held up under
+honest, leakage-free testing. All five are recorded below because the
+reasoning matters for anyone touching this code next.
 
 ## Round 1 — bugs that made the model useless
 
@@ -126,6 +128,9 @@ when characterizing what this model actually does.
 | Transformer, 13 features (earliest run, same config) | 0.0183 | 8.30x | 0.0026→0.0022 | 0.1139 | 12.2% | 10.7% | 9/75/65 |
 | Transformer, 14 features (+ `instance_interruption_rate`, real AWS data) | 0.0172 | 7.80x | 0.0022 | 0.0826 | 5.1% | 21.4% | 18/66/334 |
 | Transformer, 14 features (+ `az_price_divergence`) | 0.0103 | 4.67x | 0.0022 | 0.0536 | 10.7% | 3.6% | 3/81/25 |
+| Ensemble, leakage-free subset selection (Round 5) | 0.0500 | 22.65x | 0.0022 | 0.0942 | 8.4% | 10.7% | 9/75/98 |
+| Ensemble, naive all-5-seeds average (Round 5) | 0.0314 | 14.23x | 0.0022 | 0.1161 | 12.7% | 10.7% | 9/75/62 |
+| Data-config candidate: threshold=1.005, horizon=1, oversample=True (Round 5, 3-seed mean) | 0.0086 | 4.21x | 0.0020 | — | — | — | — |
 | XGBoost, 14 features | 0.0037 | 1.66x | 0.1461 (badly miscalibrated) | 0.0157 | 0.8% | 22.6% | 19/65/2315 |
 | Round 1 model (leaky split, broken alpha)¹ | 0.0034 | 4.0x | 0.0036 (worse than trivial) | 0.0097 | 0.5% | 4.6% | 3/62/549 |
 
@@ -167,6 +172,59 @@ sensible range near the true base rate (~0.2-0.8%) instead of the wildly
 overconfident 0.05-0.09 range Round 1 produced — direct evidence the
 calibration pass is doing its job.
 
+## Round 5 — four more levers tried, none held up
+
+Four concrete, cheap improvement attempts, each tested honestly:
+
+1. **Ensembling.** Averaged predictions from multiple independently-trained
+   seeds. A first pass (3 seeds: 0, 1, 2) looked exciting — PR-AUC 0.0554,
+   25.11x lift, beating every single run seen so far. Extending to the full
+   5 seeds *reversed* that: PR-AUC dropped to 0.0314 (14.23x), statistically
+   indistinguishable from the single-model mean (14.68x) — the 2 additional
+   seeds were individually weaker and diluted the average. Picking "seeds 0,
+   1, 2" after seeing their test-set score would just be cherry-picking, so
+   instead `ensemble_eval.py` brute-forces every non-empty subset of
+   available seeds (2^N-1, trivial at N=5), scores each on the
+   **calibration** split only, and reports the winner's performance on the
+   held-out test set. Result: **the winning "ensemble" was a single seed**
+   (seed_1, 22.65x) — with only ~27 calibration positives, there isn't
+   enough signal to reliably tell a good multi-model combination from a
+   lucky one. Conclusion: naive ensembling of everything doesn't help; a
+   principled, leakage-free selection process finds no reliable evidence
+   that ensembling beats picking one good model.
+2. **Label threshold sweep.** `is_spike = price > prev_price * 1.01` (>1%)
+   was never tuned. Tried 0.3%, 0.5%, 1% (current) combined with different
+   prediction horizons and oversampling. A quick partial-training grid
+   search initially looked promising for looser thresholds — but that
+   search had a bug (see below).
+3. **Prediction horizon sweep.** Tried 1, 3 (current), 6 steps (5/15/30 min)
+   ahead, alongside the threshold sweep.
+4. **Oversampling.** Added `WeightedRandomSampler` so the training loader
+   draws positive windows roughly as often as negative ones, instead of
+   relying on Focal Loss alone.
+
+**Bug found while running #2/#3's grid search**: the search initially
+ranked configs by raw PR-AUC. That's invalid — different thresholds/horizons
+relabel the data with different base rates, and PR-AUC's own "no skill"
+baseline rises with the base rate, so a looser threshold can *look* better
+purely because the task got statistically easier, not because the model
+discriminates better. Fixed to rank by lift-over-random (PR-AUC / that
+config's own base rate) instead. After the fix, the top candidate
+(threshold=1.005, horizon=1, oversample=True) still only reached 4.30x lift
+in the quick partial-training search — well below the current config's real
+14.68x. A full 3-seed run confirmed it: **mean lift 4.21x**, decisively worse
+than the baseline. Not shipped.
+
+**Net result of Round 5: nothing beat the documented Round 4 baseline
+(14.68x mean, 5-seed) under honest, leakage-free evaluation.** Three
+consecutive "looked promising, didn't hold up" results (Round 3's two
+features, Round 5's label-config sweep) plus a properly-controlled ensemble
+test all pointing the same direction is itself evidence: **this specific
+combination of architecture, features, and label is close to a local
+optimum** for what the current proxy-labeled dataset supports. Further gains
+need different data (real interruption labels), not more tuning of this
+setup.
+
 ## The limit fixing bugs and methodology can't fix
 
 `is_spike = spot_price > prev_price * 1.01` is a **proxy label**, not a real
@@ -190,7 +248,10 @@ Spot infrastructure; the predictive model is trained, evaluated, and
 calibrated on a held-out test set with a real, repeatable but weak signal —
 14.68x base-rate lift on average (std 1.22x, 95% CI ~9.9-19.5x) across 5
 independently seeded training runs — usable as a secondary/advisory signal,
-not a primary trigger. The ceiling is the proxy label and the small number
-of positive examples (not the model, pipeline, or measurement methodology,
-which is now on solid ground); real interruption ground truth is the
-remaining future work."*
+not a primary trigger. Four further improvement attempts (ensembling, label
+threshold, prediction horizon, oversampling) were tested honestly and none
+reliably beat this number, evidence that the current setup is close to a
+local optimum for the available data. The ceiling is the proxy label and the
+small number of positive examples (not the model, pipeline, or measurement
+methodology, which is now on solid ground); real interruption ground truth
+is the remaining future work."*

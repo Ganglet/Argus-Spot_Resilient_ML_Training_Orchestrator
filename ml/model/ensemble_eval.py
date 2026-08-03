@@ -2,6 +2,7 @@ import os
 import glob
 import json
 import joblib
+import itertools
 import numpy as np
 import torch
 from sklearn.metrics import (
@@ -62,12 +63,30 @@ def ensemble_eval(checkpoints_dir: str):
         model.eval()
         all_calib_probs.append(_predict_raw(model, dataset.sequences[calib_idx], device))
         all_test_probs.append(_predict_raw(model, dataset.sequences[test_idx], device))
-        print(f"  {os.path.basename(seed_dir)}: individual test PR-AUC = "
-              f"{average_precision_score(test_labels, all_test_probs[-1]):.4f}")
+        print(f"  {os.path.basename(seed_dir)}: calib PR-AUC = {average_precision_score(calib_labels, all_calib_probs[-1]):.4f}"
+              f"  | test PR-AUC = {average_precision_score(test_labels, all_test_probs[-1]):.4f}")
 
-    # Average the raw probabilities across seeds (simple, standard ensembling)
-    ensemble_calib_probs = np.mean(all_calib_probs, axis=0)
-    ensemble_test_probs = np.mean(all_test_probs, axis=0)
+    # Which seeds to include is itself a choice - picking whichever subset scores best
+    # on the TEST set would be the same cherry-picking this whole project has been
+    # trying to avoid (see docs/objective3_result.md's run-variance section). Instead,
+    # brute-force every non-empty subset (2^N-1, trivial at N=5) and pick the one that
+    # scores best on the CALIBRATION set - data already used for Platt scaling, not new
+    # data, and never touched by test-set reporting. Only the winning subset's test
+    # score gets reported.
+    n = len(seed_dirs)
+    best_subset, best_calib_pr_auc = None, -1.0
+    for r in range(1, n + 1):
+        for subset in itertools.combinations(range(n), r):
+            probs = np.mean([all_calib_probs[i] for i in subset], axis=0)
+            pr_auc = average_precision_score(calib_labels, probs)
+            if pr_auc > best_calib_pr_auc:
+                best_calib_pr_auc = pr_auc
+                best_subset = subset
+    chosen = [os.path.basename(seed_dirs[i]) for i in best_subset]
+    print(f"\nBest subset by CALIBRATION-set PR-AUC ({best_calib_pr_auc:.4f}): {chosen}")
+
+    ensemble_calib_probs = np.mean([all_calib_probs[i] for i in best_subset], axis=0)
+    ensemble_test_probs = np.mean([all_test_probs[i] for i in best_subset], axis=0)
 
     # Calibrate the ensemble itself (its own averaged output has its own scale)
     from sklearn.linear_model import LogisticRegression
@@ -94,8 +113,10 @@ def ensemble_eval(checkpoints_dir: str):
             print(f"TN {cm[0][0]} FP {cm[0][1]} FN {cm[1][0]} TP {cm[1][1]}")
         return {"pr_auc": float(pr_auc), "brier": float(brier), "lift": float(pr_auc / base_rate)}
 
-    print(f"\n{'='*55}\nENSEMBLE ({len(seed_dirs)} seeds averaged) - held-out test set\n{'='*55}")
+    print(f"\n{'='*55}\nENSEMBLE ({len(best_subset)} of {len(seed_dirs)} seeds, chosen via calibration set) - held-out test set\n{'='*55}")
     result = report("Ensemble (calibrated)", test_labels, ensemble_test_calibrated)
+    result["chosen_seeds"] = chosen
+    result["n_available_seeds"] = n
     return result
 
 if __name__ == "__main__":
