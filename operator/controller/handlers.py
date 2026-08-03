@@ -23,7 +23,7 @@ from controller.metrics import checkpoint_count, risk_score_gauge, job_completio
 logger = logging.getLogger(__name__)
 
 PREDICT_SERVICE_URL = os.environ.get("PREDICT_SERVICE_URL", "http://localhost:8000")
-RISK_THRESHOLD_DEFAULT = float(os.environ.get("RISK_THRESHOLD", "0.65"))
+RISK_THRESHOLD_DEFAULT = float(os.environ.get("RISK_THRESHOLD", "0.0015"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
 
 # When AWS_ENDPOINT_URL is set (local dev via .env.local), boto3 hits LocalStack.

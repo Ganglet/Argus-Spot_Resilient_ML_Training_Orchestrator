@@ -2,8 +2,8 @@
   "name": "predictive",
   "checkpoint_mode": "predictive",
   "step_budget": 200,
-  "risk_lead_seconds": 300,
+  "risk_lead_seconds": 600,
   "risk_trigger_file": "RISK",
   "migrates_on_risk": true,
-  "_note": "risk_lead_seconds is a placeholder lead time ahead of the simulated interruption; Track 3 will supply the model's real measured lead time once it stops returning a flat 0.0419 score."
+  "_note": "600s = the model's empirically measured mean lead time against the PROXY label (price spikes), from ml/model/measure_lead_time.py: 9 true positives, mean 600s, median 600s, range 300-900s. Bounded at 900s by the label's own 3-step (15 min) horizon by construction - this is not a measurement against real AWS interruptions (see docs/objective3_result.md), and 9 data points is a small, noisy sample. Replaces the earlier 300s placeholder with a real number, not a proof the deployed model achieves this against actual reclaims."
 }

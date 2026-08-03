@@ -5,7 +5,13 @@ image:
 
 operator:
   pollIntervalSeconds: 60
-  riskThreshold: 0.65
+  # 0.65 was the old default and never fires — the real model's calibrated risk
+  # scores top out around 0.0018 on held-out data (see docs/week7_model_evaluation.md),
+  # so 0.65 silently disabled the predictive path entirely. 0.0015 is the model's
+  # own best-F1 threshold (10.7% recall, 63 alarms on the test set) — tune lower
+  # for more recall at the cost of more checkpoint overhead, see the threshold
+  # table in that doc before changing this.
+  riskThreshold: 0.0015
   predictServiceUrl: http://argus-predict-service:8000
 
 metrics:

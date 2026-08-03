@@ -25,6 +25,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # rate of whichever instance type the final EKS run uses (see ADR-005).
 SPOT_HOURLY_RATE_USD = 0.058
 
+# c5.xlarge On-Demand rate in eu-north-1 (ml/data/feature_pipeline.py's OD_PRICES) -
+# c5.xlarge/m5.xlarge are the types actually used for Objective 1's real Spot node
+# (docs/objective1_result.md), so this is the real comparison, not an invented number.
+ON_DEMAND_HOURLY_RATE_USD = 0.188
+
+# The 80-trial sweep behind docs/objective2_result.md ran before harness.py logged
+# step_time_sec into run_meta (added afterward) - hardcode the value that sweep
+# actually used (its own reproduce command: --step-time-sec 0.3) rather than
+# re-running hours of trials just to backfill one number. New runs log it themselves.
+FALLBACK_STEP_TIME_SEC = 0.3
+
 START_EVENTS = ("started", "resumed")
 
 
@@ -96,6 +107,17 @@ def parse_run(run_dir):
 
     cost_usd = (makespan_sec / 3600.0 * SPOT_HOURLY_RATE_USD) if makespan_sec is not None else None
 
+    # On-Demand comparison: what this same step_budget would cost on a guaranteed
+    # instance that's never interrupted (step_budget * step_time_sec, no wasted-restart
+    # overhead) at the On-Demand rate, vs. what THIS arm actually cost on Spot
+    # (its own makespan, wasted-restart overhead included, at the Spot rate). This is
+    # the number that answers "does Spot's hourly discount survive interruption
+    # overhead, or does a bad checkpoint policy eat the savings?"
+    step_time_sec = meta.get("step_time_sec", FALLBACK_STEP_TIME_SEC)
+    ondemand_baseline_sec = meta["step_budget"] * step_time_sec
+    cost_on_demand_usd = ondemand_baseline_sec / 3600.0 * ON_DEMAND_HOURLY_RATE_USD
+    cost_savings_pct = (1 - cost_usd / cost_on_demand_usd) * 100.0 if cost_usd is not None else None
+
     return {
         "arm": meta["arm"],
         "rate_seconds": meta["rate_seconds"],
@@ -111,12 +133,15 @@ def parse_run(run_dir):
         "recovery_time_sec": recovery_time_sec,
         "lead_time_sec": lead_time_sec,
         "cost_usd": cost_usd,
+        "cost_on_demand_usd": cost_on_demand_usd,
+        "cost_savings_vs_ondemand_pct": cost_savings_pct,
     }
 
 
 def build_summary_table(df):
     metrics = ["completed", "makespan_sec", "wasted_compute_sec", "recovery_time_sec",
-               "num_checkpoints", "cost_usd", "lead_time_sec"]
+               "num_checkpoints", "cost_usd", "cost_on_demand_usd", "cost_savings_vs_ondemand_pct",
+               "lead_time_sec"]
     grouped = df.groupby(["arm", "rate_seconds"])
     table = grouped[metrics].agg(["mean", "std"])
     table.columns = [f"{m}_{stat}" for m, stat in table.columns]
