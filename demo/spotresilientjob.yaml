@@ -8,6 +8,11 @@ spec:
   command: ["python", "train.py"]
   checkpointPath: s3://argus-checkpoints-844641713781/checkpoints/cifar10-test
   checkpointIntervalSteps: 500
+  # NOTE: 0.65 only makes sense against the mock predictor's 0-1 output range
+  # (used for the Week 7 dashboard demo, docs/A6_observability.md). Against the
+  # REAL model, whose calibrated scores top out around 0.0018, this never fires -
+  # see docs/week7_model_evaluation.md. Set this to ~0.0015 (the model's own
+  # best-F1 threshold) if pointing PREDICT_SERVICE_URL at the real predict-service.
   riskThreshold: 0.65
   instanceFallback:
     - m5.xlarge   # model has real features for this type + AZ (m5.large has none → 404)
