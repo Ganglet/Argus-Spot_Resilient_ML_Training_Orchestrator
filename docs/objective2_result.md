@@ -157,6 +157,41 @@ need periodic's baseline I/O tax at low interruption rates: periodic still
 does 24 checkpoints at rate=1800s where nothing was ever going to interrupt
 it, wasting I/O for no benefit).
 
+## Week 7 — cost vs. On-Demand
+
+Added a real cost comparison: what this same `step_budget` would cost on a
+guaranteed On-Demand instance that's never interrupted (no wasted-restart
+overhead), vs. what each arm actually cost on Spot (its own makespan,
+overhead included). Uses `c5.xlarge`'s real eu-north-1 On-Demand rate
+($0.188/hr, same instance type as Objective 1's real Spot node) against the
+benchmark's placeholder Spot rate ($0.058/hr).
+
+| Arm | Rate | Savings vs. On-Demand |
+|---|---|---|
+| no-protection | 120s | **25.6%** |
+| no-protection | 300s / 600s / 1800s | 64-68% |
+| periodic | all 4 rates | **67-68%** (flat, rate-independent) |
+| reactive | 120s | 32.5% |
+| reactive | 300s / 600s / 1800s | 64-68% |
+| **predictive** | **120s** | **27.4%** |
+| predictive | 300s / 600s / 1800s | 62-69% |
+
+At slow interruption rates, every arm captures roughly the full ~68% Spot
+discount — makes sense, nothing interrupts often enough to matter. **At the
+fastest rate (120s), the story changes: predictive's savings (27.4%) barely
+beat no-protection's (25.6%)**, and both trail reactive (32.5%). This isn't a
+contradiction of the wasted-compute finding above — it's the dollar-cost side
+of the same overhead problem. Predictive's zero wasted-compute record at
+rate=120s came from 221.6 checkpoints in one run; that many respawns/saves
+extends wall-clock makespan (and therefore cost) even though no work was ever
+redone. **"Zero wasted compute" and "cheapest" are not the same claim** —
+overhead has a price too, and at this rate it very nearly erases predictive's
+advantage.
+
+**Periodic is the most cost-stable arm** — 67-68% savings at every single
+rate, because its checkpoint cadence is fixed and never reacts to (or gets
+overwhelmed by) how often interruptions actually happen.
+
 ## Honest limitations
 
 - **`risk_lead_seconds=600` is measured against the PROXY label, not real
