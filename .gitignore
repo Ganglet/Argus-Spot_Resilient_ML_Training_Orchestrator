@@ -28,6 +28,7 @@ credentials
 ml/model/model_metadata.json
 ml/model/multi_seed_results.json
 ml/model/chaos_threshold_sweep.json
+ml/model/spot_xgboost.json
 mlruns/
 ml/data/*.csv
 ml/data/*.png
@@ -56,3 +57,7 @@ terraform.exe
 # summary_*.csv and figures/ (the actual deliverable) stay tracked.
 benchmark/data/
 benchmark/results/raw/
+benchmark/results/raw_stress/
+
+# Local-only draft materials (slides, demo script) — not for GitHub
+presentation_files/

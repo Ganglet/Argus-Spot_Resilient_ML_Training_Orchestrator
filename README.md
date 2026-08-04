@@ -1,5 +1,11 @@
 # Argus — Spot-Resilient ML Training Orchestrator
 
+[![Build](https://github.com/Ganglet/Argus-Spot_Resilient_ML_Training_Orchestrator/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/Ganglet/Argus-Spot_Resilient_ML_Training_Orchestrator/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](ml/api/Dockerfile)
+[![Kubernetes](https://img.shields.io/badge/kubernetes-operator-326ce5.svg)](helm/argus)
+[![AWS EKS](https://img.shields.io/badge/AWS-EKS-ff9900.svg)](docs/objective1_result.md)
+
 A three-layer system that predicts EC2 Spot interruptions before they happen and automatically checkpoints + migrates running ML training jobs — zero human intervention. **Validated end-to-end on real AWS EKS.**
 
 > **Status: complete (Weeks 1–8).** Live-EKS interruption survival captured, a controlled benchmark quantifies when prediction pays, the risk model is trained/calibrated/characterized, and the whole loop is observable in Grafana. Targeting a NeurIPS ML4Sys 2026 workshop poster.
@@ -144,16 +150,22 @@ Project/
 └── docs/               # Objective results, decisions log, ADRs, poster blueprint, figures
 ```
 
-## Reproduce
+## Quick start
+
+No AWS account, no cluster — see the core result (predictive vs. reactive vs.
+no-protection under interruptions) in under a minute:
+
+```bash
+python benchmark/harness.py --reps 5 --step-budget 500 --step-time-sec 0.3
+python benchmark/aggregate.py                   # -> benchmark/results/summary_table.csv
+```
+
+## Reproduce everything else
 
 ```bash
 # --- Local dev (offline, free) ---
 cd localstack && docker compose up -d          # LocalStack S3/SQS
 bash minikube/setup.sh                          # CRD + RBAC on minikube
-
-# --- Benchmark (Objective 2, no cloud needed) ---
-python benchmark/harness.py --reps 5 --step-budget 500 --step-time-sec 0.3
-python benchmark/aggregate.py                   # -> benchmark/results/
 
 # --- Observability stack (minikube) ---
 helm upgrade --install argus ./helm/argus --namespace default
