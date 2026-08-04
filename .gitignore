@@ -57,3 +57,6 @@ terraform.exe
 benchmark/data/
 benchmark/results/raw/
 benchmark/results/raw_stress/
+
+# Local-only draft materials (paper, slides, demo script) — not for GitHub
+presentation_files/
