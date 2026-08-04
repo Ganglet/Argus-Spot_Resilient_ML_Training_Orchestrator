@@ -56,3 +56,4 @@ terraform.exe
 # summary_*.csv and figures/ (the actual deliverable) stay tracked.
 benchmark/data/
 benchmark/results/raw/
+benchmark/results/raw_stress/
