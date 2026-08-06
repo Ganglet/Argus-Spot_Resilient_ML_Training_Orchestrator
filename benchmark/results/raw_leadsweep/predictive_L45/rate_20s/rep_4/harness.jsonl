@@ -1,0 +1,40 @@
+{"ts": 1786010420.460326, "event": "run_meta", "arm": "predictive_L45", "rate_seconds": 20, "rep": 4, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786010422.086138, "event": "risk_triggered", "scheduled_kill_at": 1786010465.9190226, "lead_seconds": 45}
+{"ts": 1786010423.564874, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010423.565505, "event": "risk_triggered", "scheduled_kill_at": 1786010433.7814527, "lead_seconds": 45}
+{"ts": 1786010425.015637, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010425.015927, "event": "risk_triggered", "scheduled_kill_at": 1786010442.780563, "lead_seconds": 45}
+{"ts": 1786010426.466327, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010426.466781, "event": "risk_triggered", "scheduled_kill_at": 1786010465.7583861, "lead_seconds": 45}
+{"ts": 1786010427.90222, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010427.902516, "event": "risk_triggered", "scheduled_kill_at": 1786010433.0917826, "lead_seconds": 45}
+{"ts": 1786010429.369899, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010429.37024, "event": "risk_triggered", "scheduled_kill_at": 1786010443.8718383, "lead_seconds": 45}
+{"ts": 1786010430.798364, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010430.798765, "event": "risk_triggered", "scheduled_kill_at": 1786010448.327056, "lead_seconds": 45}
+{"ts": 1786010432.279406, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010446.10789, "event": "risk_triggered", "scheduled_kill_at": 1786010491.1046805, "lead_seconds": 45}
+{"ts": 1786010447.843615, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010447.84393, "event": "risk_triggered", "scheduled_kill_at": 1786010448.497997, "lead_seconds": 45}
+{"ts": 1786010449.658966, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010449.659389, "event": "risk_triggered", "scheduled_kill_at": 1786010451.087945, "lead_seconds": 45}
+{"ts": 1786010451.151731, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010451.152081, "event": "risk_triggered", "scheduled_kill_at": 1786010458.8676698, "lead_seconds": 45}
+{"ts": 1786010452.613473, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010452.613817, "event": "risk_triggered", "scheduled_kill_at": 1786010487.4835873, "lead_seconds": 45}
+{"ts": 1786010454.0921652, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010454.092555, "event": "risk_triggered", "scheduled_kill_at": 1786010491.1416254, "lead_seconds": 45}
+{"ts": 1786010455.5362098, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010455.536525, "event": "risk_triggered", "scheduled_kill_at": 1786010458.445959, "lead_seconds": 45}
+{"ts": 1786010457.025246, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010462.4326541, "event": "risk_triggered", "scheduled_kill_at": 1786010507.4253013, "lead_seconds": 45}
+{"ts": 1786010463.805871, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010463.8067892, "event": "risk_triggered", "scheduled_kill_at": 1786010478.812373, "lead_seconds": 45}
+{"ts": 1786010465.2878091, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010489.068417, "event": "risk_triggered", "scheduled_kill_at": 1786010534.0639107, "lead_seconds": 45}
+{"ts": 1786010490.8716319, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010500.393755, "event": "risk_triggered", "scheduled_kill_at": 1786010545.3923426, "lead_seconds": 45}
+{"ts": 1786010502.509113, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010502.509643, "event": "risk_triggered", "scheduled_kill_at": 1786010504.4599845, "lead_seconds": 45}
+{"ts": 1786010504.276653, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786010515.442528, "event": "job_exit", "outcome": "completed"}

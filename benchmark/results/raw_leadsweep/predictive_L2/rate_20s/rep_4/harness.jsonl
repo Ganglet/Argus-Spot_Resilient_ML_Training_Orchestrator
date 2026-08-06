@@ -1,0 +1,6 @@
+{"ts": 1786007618.674119, "event": "run_meta", "arm": "predictive_L2", "rate_seconds": 20, "rep": 4, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786007661.878504, "event": "risk_triggered", "scheduled_kill_at": 1786007663.8726456, "lead_seconds": 2}
+{"ts": 1786007663.972745, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007672.1905909, "event": "risk_triggered", "scheduled_kill_at": 1786007674.1892478, "lead_seconds": 2}
+{"ts": 1786007673.999549, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007688.973781, "event": "job_exit", "outcome": "completed"}

@@ -1,0 +1,7 @@
+{"ts": 1786011620.7635908, "event": "run_meta", "arm": "periodic", "rate_seconds": 20, "rep": 0, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786011645.098507, "event": "interrupted"}
+{"ts": 1786011647.1460118, "event": "interrupted"}
+{"ts": 1786011655.140061, "event": "interrupted"}
+{"ts": 1786011661.7441459, "event": "interrupted"}
+{"ts": 1786011690.283974, "event": "interrupted"}
+{"ts": 1786011699.2928908, "event": "job_exit", "outcome": "completed"}

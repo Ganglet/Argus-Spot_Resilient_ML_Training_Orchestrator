@@ -1,0 +1,22 @@
+{"ts": 1786007839.685886, "event": "run_meta", "arm": "predictive_L5", "rate_seconds": 20, "rep": 2, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786007846.803482, "event": "risk_triggered", "scheduled_kill_at": 1786007851.800048, "lead_seconds": 5}
+{"ts": 1786007848.6222332, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007859.240721, "event": "risk_triggered", "scheduled_kill_at": 1786007864.2389128, "lead_seconds": 5}
+{"ts": 1786007860.997393, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007895.618891, "event": "risk_triggered", "scheduled_kill_at": 1786007900.6129215, "lead_seconds": 5}
+{"ts": 1786007897.523675, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007897.524995, "event": "risk_triggered", "scheduled_kill_at": 1786007901.412383, "lead_seconds": 5}
+{"ts": 1786007899.086674, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007899.190964, "event": "risk_triggered", "scheduled_kill_at": 1786007904.1888893, "lead_seconds": 5}
+{"ts": 1786007900.781421, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007900.7818398, "event": "risk_triggered", "scheduled_kill_at": 1786007901.3722856, "lead_seconds": 5}
+{"ts": 1786007902.25068, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007902.251034, "event": "risk_triggered", "scheduled_kill_at": 1786007904.7315977, "lead_seconds": 5}
+{"ts": 1786007903.905341, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007903.9057028, "event": "risk_triggered", "scheduled_kill_at": 1786007904.0824463, "lead_seconds": 5}
+{"ts": 1786007905.366255, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007905.366561, "event": "risk_triggered", "scheduled_kill_at": 1786007908.774863, "lead_seconds": 5}
+{"ts": 1786007906.838159, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007916.26086, "event": "risk_triggered", "scheduled_kill_at": 1786007921.2575133, "lead_seconds": 5}
+{"ts": 1786007918.120598, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786007922.263009, "event": "job_exit", "outcome": "completed"}

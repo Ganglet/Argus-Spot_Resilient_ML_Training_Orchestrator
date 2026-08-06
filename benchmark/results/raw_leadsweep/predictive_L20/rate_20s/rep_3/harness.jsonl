@@ -1,0 +1,44 @@
+{"ts": 1786009177.002761, "event": "run_meta", "arm": "predictive_L20", "rate_seconds": 20, "rep": 3, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786009178.741481, "event": "risk_triggered", "scheduled_kill_at": 1786009185.08696, "lead_seconds": 20}
+{"ts": 1786009180.261855, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009180.262181, "event": "risk_triggered", "scheduled_kill_at": 1786009193.651769, "lead_seconds": 20}
+{"ts": 1786009181.697879, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009181.698545, "event": "risk_triggered", "scheduled_kill_at": 1786009183.4069502, "lead_seconds": 20}
+{"ts": 1786009183.177543, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009183.177888, "event": "risk_triggered", "scheduled_kill_at": 1786009191.4497254, "lead_seconds": 20}
+{"ts": 1786009184.5967622, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009184.5970728, "event": "risk_triggered", "scheduled_kill_at": 1786009186.0986152, "lead_seconds": 20}
+{"ts": 1786009186.077166, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009186.077538, "event": "risk_triggered", "scheduled_kill_at": 1786009186.2993724, "lead_seconds": 20}
+{"ts": 1786009187.539402, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009187.539819, "event": "risk_triggered", "scheduled_kill_at": 1786009194.216991, "lead_seconds": 20}
+{"ts": 1786009189.3938482, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009189.395444, "event": "risk_triggered", "scheduled_kill_at": 1786009191.8996742, "lead_seconds": 20}
+{"ts": 1786009191.064953, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009191.065404, "event": "risk_triggered", "scheduled_kill_at": 1786009198.5166578, "lead_seconds": 20}
+{"ts": 1786009192.5748742, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009199.789938, "event": "risk_triggered", "scheduled_kill_at": 1786009219.785408, "lead_seconds": 20}
+{"ts": 1786009201.240787, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009201.241175, "event": "risk_triggered", "scheduled_kill_at": 1786009201.9692292, "lead_seconds": 20}
+{"ts": 1786009202.6877792, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009202.68809, "event": "risk_triggered", "scheduled_kill_at": 1786009222.30123, "lead_seconds": 20}
+{"ts": 1786009204.2087219, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009204.209056, "event": "risk_triggered", "scheduled_kill_at": 1786009207.1097074, "lead_seconds": 20}
+{"ts": 1786009205.6375198, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009217.3480399, "event": "risk_triggered", "scheduled_kill_at": 1786009237.3396137, "lead_seconds": 20}
+{"ts": 1786009219.125005, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009225.837106, "event": "risk_triggered", "scheduled_kill_at": 1786009245.834835, "lead_seconds": 20}
+{"ts": 1786009227.5309381, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009227.5314329, "event": "risk_triggered", "scheduled_kill_at": 1786009232.2713304, "lead_seconds": 20}
+{"ts": 1786009228.9486709, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009246.639976, "event": "risk_triggered", "scheduled_kill_at": 1786009266.636511, "lead_seconds": 20}
+{"ts": 1786009248.782348, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009254.0516338, "event": "risk_triggered", "scheduled_kill_at": 1786009274.050259, "lead_seconds": 20}
+{"ts": 1786009255.846368, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009255.846755, "event": "risk_triggered", "scheduled_kill_at": 1786009257.4047756, "lead_seconds": 20}
+{"ts": 1786009257.278888, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009257.279229, "event": "risk_triggered", "scheduled_kill_at": 1786009267.768521, "lead_seconds": 20}
+{"ts": 1786009258.713491, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009262.8248699, "event": "risk_triggered", "scheduled_kill_at": 1786009282.8234625, "lead_seconds": 20}
+{"ts": 1786009264.2436, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009274.834688, "event": "job_exit", "outcome": "completed"}
