@@ -61,3 +61,6 @@ benchmark/results/raw_stress/
 
 # Local-only draft materials (slides, demo script) — not for GitHub
 presentation_files/
+
+#paper
+/paper

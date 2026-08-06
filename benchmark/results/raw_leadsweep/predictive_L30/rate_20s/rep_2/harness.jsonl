@@ -1,0 +1,22 @@
+{"ts": 1786009573.713444, "event": "run_meta", "arm": "predictive_L30", "rate_seconds": 20, "rep": 2, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786009575.40866, "event": "risk_triggered", "scheduled_kill_at": 1786009585.9115572, "lead_seconds": 30}
+{"ts": 1786009576.946699, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009576.9472268, "event": "risk_triggered", "scheduled_kill_at": 1786009592.5635936, "lead_seconds": 30}
+{"ts": 1786009578.585485, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009588.203298, "event": "risk_triggered", "scheduled_kill_at": 1786009618.2011502, "lead_seconds": 30}
+{"ts": 1786009590.376412, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009590.376929, "event": "risk_triggered", "scheduled_kill_at": 1786009594.264562, "lead_seconds": 30}
+{"ts": 1786009591.8607209, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009591.8610702, "event": "risk_triggered", "scheduled_kill_at": 1786009596.962899, "lead_seconds": 30}
+{"ts": 1786009593.338681, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009593.338976, "event": "risk_triggered", "scheduled_kill_at": 1786009593.9294295, "lead_seconds": 30}
+{"ts": 1786009594.7923489, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009594.7926888, "event": "risk_triggered", "scheduled_kill_at": 1786009597.2732484, "lead_seconds": 30}
+{"ts": 1786009596.2618601, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009596.2622, "event": "risk_triggered", "scheduled_kill_at": 1786009596.4389594, "lead_seconds": 30}
+{"ts": 1786009597.711575, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009597.711843, "event": "risk_triggered", "scheduled_kill_at": 1786009601.120136, "lead_seconds": 30}
+{"ts": 1786009599.2162309, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009599.2165608, "event": "risk_triggered", "scheduled_kill_at": 1786009613.6355715, "lead_seconds": 30}
+{"ts": 1786009601.1313689, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786009655.417305, "event": "job_exit", "outcome": "completed"}

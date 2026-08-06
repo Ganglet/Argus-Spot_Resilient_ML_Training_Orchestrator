@@ -1,0 +1,8 @@
+{"ts": 1786008409.554786, "event": "run_meta", "arm": "predictive_L10", "rate_seconds": 20, "rep": 4, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786008445.228374, "event": "risk_triggered", "scheduled_kill_at": 1786008455.2251136, "lead_seconds": 10}
+{"ts": 1786008447.187855, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008447.4047859, "event": "risk_triggered", "scheduled_kill_at": 1786008457.4043927, "lead_seconds": 10}
+{"ts": 1786008448.837174, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008456.6069472, "event": "risk_triggered", "scheduled_kill_at": 1786008466.6021543, "lead_seconds": 10}
+{"ts": 1786008458.0549052, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008480.92028, "event": "job_exit", "outcome": "completed"}

@@ -1,0 +1,22 @@
+{"ts": 1786008657.7859578, "event": "run_meta", "arm": "predictive_L15", "rate_seconds": 20, "rep": 2, "step_budget": 600, "step_time_sec": 0.1}
+{"ts": 1786008659.142035, "event": "risk_triggered", "scheduled_kill_at": 1786008669.6449502, "lead_seconds": 15}
+{"ts": 1786008660.6506371, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008661.268427, "event": "risk_triggered", "scheduled_kill_at": 1786008676.2673225, "lead_seconds": 15}
+{"ts": 1786008662.666812, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008687.292979, "event": "risk_triggered", "scheduled_kill_at": 1786008702.2911062, "lead_seconds": 15}
+{"ts": 1786008689.30439, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008689.30477, "event": "risk_triggered", "scheduled_kill_at": 1786008693.192481, "lead_seconds": 15}
+{"ts": 1786008690.949468, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008690.9500139, "event": "risk_triggered", "scheduled_kill_at": 1786008696.051774, "lead_seconds": 15}
+{"ts": 1786008692.552354, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008692.552706, "event": "risk_triggered", "scheduled_kill_at": 1786008693.1431515, "lead_seconds": 15}
+{"ts": 1786008694.1919549, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008694.1925492, "event": "risk_triggered", "scheduled_kill_at": 1786008696.6730366, "lead_seconds": 15}
+{"ts": 1786008695.745048, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008695.74536, "event": "risk_triggered", "scheduled_kill_at": 1786008695.9221337, "lead_seconds": 15}
+{"ts": 1786008697.303575, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008697.303932, "event": "risk_triggered", "scheduled_kill_at": 1786008700.7122102, "lead_seconds": 15}
+{"ts": 1786008698.925153, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008698.925604, "event": "risk_triggered", "scheduled_kill_at": 1786008713.3445466, "lead_seconds": 15}
+{"ts": 1786008700.527381, "event": "migrated", "risk_confirmed": true}
+{"ts": 1786008738.982573, "event": "job_exit", "outcome": "completed"}

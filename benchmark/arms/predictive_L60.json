@@ -1,0 +1,9 @@
+{
+  "name": "predictive_L60",
+  "checkpoint_mode": "predictive",
+  "step_budget": 200,
+  "risk_lead_seconds": 60,
+  "risk_trigger_file": "RISK",
+  "migrates_on_risk": true,
+  "_note": "lead-time sensitivity variant: risk_lead_seconds=60s (see docs/poster_blueprint.md 3.3)"
+}
